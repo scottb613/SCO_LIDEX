@@ -1,0 +1,7 @@
+# Copy this file to your route folder as SCOLIDEXTiles.txt.
+# One terrain tile name per line.
+# Lines beginning with # are ignored.
+
+-04bea740
+-04bea744
+-04bea748

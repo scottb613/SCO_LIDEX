@@ -1,0 +1,37 @@
+SCO LIDEX Third-Party Notices
+=============================
+
+This distribution includes third-party components required to run SCO LIDEX.
+Top-level SCO LIDEX source/application files are distributed under GNU GPL v3
+or later. Third-party components remain under their own licenses.
+
+MaxRev.Gdal.Universal
+---------------------
+NuGet package used to provide GDAL bindings and native runtime support.
+Project/package information:
+https://www.nuget.org/packages/MaxRev.Gdal.Universal
+
+Microsoft .NET Runtime
+----------------------
+This self-contained Windows build includes Microsoft .NET runtime components.
+Project information:
+https://dotnet.microsoft.com/
+
+GDAL
+----
+GDAL is used for raster/elevation data access.
+Project information:
+https://gdal.org/
+The distributed runtime includes GDAL license information in:
+SCOLIDEX-win-x64\LICENSE.TXT
+
+Open Rails / MSTS / TSRE route formats
+--------------------------------------
+SCO LIDEX writes files compatible with Open Rails / MSTS route terrain and
+TSRE-style terrain workflows. SCO LIDEX is not an official Open Rails or TSRE
+project.
+
+USGS elevation services
+-----------------------
+SCO LIDEX requests elevation products from USGS services. Users are responsible
+for complying with any applicable USGS service terms and availability limits.

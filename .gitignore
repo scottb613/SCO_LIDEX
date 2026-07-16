@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.log
+*.tmp
+*.zip
+dist/
+Saves/
+build-check/
+Corel Auto-Preserve/
+*.pspimage
+SCOLIDEX-startup-error.txt
+SCOLIDEX.log

@@ -1,0 +1,21 @@
+SCO LIDEX Source Build Notes
+============================
+
+SCO LIDEX is a Windows-only .NET WinForms application.
+
+Requirements:
+- Windows 10 or newer.
+- .NET SDK matching the target framework in SCOLIDEX.csproj.
+- Internet access for normal terrain runs, because elevation data is requested
+  from USGS services at runtime.
+
+Build:
+  dotnet build SCOLIDEX.csproj -c Release
+
+Publish self-contained Win x64:
+  dotnet publish SCOLIDEX.csproj -c Release -r win-x64 --self-contained true -o dist\SCOLIDEX-win-x64
+
+License:
+SCO LIDEX source/application files are distributed under GNU GPL v3 or later.
+Third-party components remain under their own licenses. See LICENSE.txt and
+THIRD_PARTY_NOTICES.txt.

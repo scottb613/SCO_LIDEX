@@ -1,0 +1,287 @@
+SCO LIDEX Changelog
+===================
+
+v1.000
+------
+- Finalized first public release version numbering.
+- Help viewer copy/example text now uses the same standard dark text color
+  instead of the brown accent color.
+- Added single-instance GUI protection so a second launch does not start a
+  second SCO LIDEX session.
+- Tightened release documentation and third-party notice wording.
+
+v0.117
+------
+- Updated retry documentation: Append is now documented as the primary recovery
+  path for retryable failed normal terrain tiles.
+- Clarified that SCOLIDEXTiles.txt paste-ready lists are optional targeted
+  retries, not the first required recovery step.
+
+v0.116
+------
+- Standardized status tally colors so normal counts use the same neutral color.
+- Failure counts still use the failure color.
+
+v0.115
+------
+- Restored publishing of bundled generated-tiles clean terrain templates.
+- Scan now checks Clean Tile Wipe template availability before enabling Run,
+  so a missing clean template is caught before any route files are written.
+- This fixes Clean Tile Wipe runs failing mid-route with "could not find a
+  clean terrain .t template".
+
+v0.114
+------
+- Changed normal route terrain DEM sampling to use the ORTS 256-post raw grid
+  at true 8m post spacing.
+- Normal _y.raw terrain now samples a 2040m stored post span inside the nominal
+  2048m tile instead of stretching 256 posts across the full tile footprint.
+- This should improve terrain alignment with route/map overlays while keeping
+  existing seam merge behavior intact.
+- Updated README, INSTRUCTIONS/Help, BLURB, and package version text.
+
+v0.88
+-----
+- Reworked the main layout so Status aligns with the top of Selection and Post Process Bias sits below Status.
+- Expanded Selection to align its bottom with Post Process Bias.
+- Left-aligned the Post Process Bias Commit button.
+
+v0.87
+-----
+- Removed the separate Advanced Geo Bias frame.
+- Renamed Post Process to Post Process Bias and made it the single bias control for generation and post-process shifting.
+- Moved the Commit button below the directional sliders.
+- Post Process Commit can now shift existing TSRE-style DM tiles when Create DM Tiles is selected.
+- Dropped the planned Undo button; route backups remain the user's responsibility before committing terrain edits.
+
+v0.86
+-----
+- Renamed the Post Process button from "Commit Shift" to "Commit".
+
+v0.85
+-----
+- Added a Post Process frame below Selection for quick existing-terrain mesh shift tests.
+- Added Commit Shift, which rewrites selected normal _y.raw grids using existing neighboring terrain data only, with no USGS downloads.
+- Stretched the GUI vertically while leaving the existing Mode, Options, Selection, Advanced Geo Bias, and Status frames in their current positions.
+
+v0.84
+-----
+- Corrected Advanced Geo Bias sign handling so positive N/E values move generated terrain features north/east on the route.
+- Renamed the run log message from DEM source geo bias to terrain geo bias for clarity.
+
+v0.83
+-----
+- Added bullet markers to the indented status resolution labels.
+
+v0.82
+-----
+- Bottom-aligned the title, byline, and version text with the title logo.
+
+v0.81
+-----
+- Reworked the Options group layout so checkbox rows align visually with the Mode group.
+
+v0.80
+-----
+- Increased the Open Rails title mark size again while preserving the existing layout.
+
+v0.79
+-----
+- Enlarged the Open Rails title mark and re-centered the title/byline text.
+
+v0.78
+-----
+- Added the Open Rails PNG mark to the left side of the GUI title.
+- Included the title PNG in build and publish output.
+
+v0.77
+-----
+- Fixed Scan Override visibility by changing Options to a compact 2x2 layout.
+- Renamed "Create Distant Mountains" to "Create DM Tiles" to reduce crowding.
+
+v0.76
+-----
+- Added a Scan Override option that disables Scan and allows Run without a prior scan.
+- Added a right-justified Help button that opens INSTRUCTIONS.txt.
+- Moved the second Options column farther right for cleaner spacing.
+
+v0.75
+-----
+- Increased the shared frame area height so the Status frame has enough room for all rows at common Windows DPI/font settings.
+- Kept the Selection and Status frame bottoms aligned after the height increase.
+
+v0.74
+-----
+- Replaced the nested AutoSize/TableLayout GUI arrangement with a fixed-height options panel and explicit group positioning.
+- Kept Selection and Status bottoms aligned while preserving all Status rows.
+- Enabled double buffering and resize redraw to reduce repaint artifacts.
+
+v0.73
+-----
+- Reworked the Selection/right-column row as one fixed shared-height area so the frame bottoms align.
+- Reduced the Status block height and restored all Status rows by making the table fill its group with explicit row styles.
+
+v0.72
+-----
+- Increased the GUI window height again and reserved explicit vertical space for the right-side controls.
+- Changed Advanced Geo Bias and Status to fixed-height right-column blocks to prevent clipping or overlap.
+
+v0.71
+-----
+- Increased the default and minimum GUI window height to prevent Status from overlapping Advanced Geo Bias.
+- Gave the log window enough default vertical room for roughly 10-15 visible lines.
+- Reworked the right-side layout stack so Advanced Geo Bias stays at the top and Status stays at the bottom without overlap.
+
+v0.70
+-----
+- Restored first-time Distant Mountain creation by publishing the bundled TSRE-style lo_tile template.
+- Scan now finds bundled Distant Mountain templates from the application folder.
+- Existing DEMEX-style lo_tiles are detected; Run purges them and rebuilds TSRE-style lo_tiles.
+- Scan remains read-only and only warns when DEMEX-style lo_tiles will be replaced during Run.
+
+v0.69
+-----
+- Rebranded the application from SCO TOPO/SCOtopo to SCO LIDEX.
+- Added the GUI byline "by Beast of Burden".
+- Renamed the published executable to SCOLIDEX.exe and updated the desktop shortcut helper.
+- Reordered the Status panel so Skip appears just above Fail.
+- Indented the 1m, 5m~, and 10m status rows.
+- Standardized log source labels to 1m, 5m~, and 10m while preserving official USGS dataset names in detail lines.
+
+v0.68
+-----
+- Added a read-only GUI Scan step that must pass before Run is enabled.
+- Scan validates route folders, selected tile names, raw-grid readability, decoded positions, and representative USGS service responses.
+- Scan writes its report to the GUI console and Desktop SCOtopo.log, sets Total status counters, and keeps settings locked until Run or Abort.
+- DM status totals stay blank unless Distant Mountains are selected or present in the active scan/run.
+
+v0.67
+-----
+- Renamed the GUI intermediate-resolution status row from Opr to 5m~ for readability.
+- Internal logs still use OPR because that is the USGS source product name.
+
+v0.66
+-----
+- Reverted distant mountain DEM generation to 10m-only source data.
+- Removed Opr counting from the DM Tiles status column.
+- Kept Opr as the intermediate fallback for normal route tiles.
+
+v0.65
+-----
+- Updated the GUI Status panel to show Total, Proc, Skip, 1m, Opr, 10m, and Fail.
+- Changed Proc to count only modified/generated tiles, not every visited tile.
+- Added live GUI source counters for 1m, Opr, and 10m usage.
+
+v0.64
+-----
+- Added USGS Original Product Resolution (OPR) DEM as an intermediate fallback between 1m DEM and 1/3 arc-second DEM.
+- Updated normal terrain and distant mountain source reporting to list OPR sample usage.
+- Updated resolution summaries to distinguish 1m, OPR, 1/3 arc-second, and neighbor-filled tiles.
+
+v0.63
+-----
+- Separated retryable failed tiles from unmappable failed tiles in the log.
+- Prevented unmappable underscore-depth tiles from being printed as paste-ready retry entries.
+- Accepted underscore-prefixed normal-depth tile names in SCOtopoTiles.txt.
+
+v0.62
+-----
+- Added Desktop startup crash log for GUI launch failures.
+- Added GUI settings to the start of SCOtopo.log.
+- Added elapsed time to the end of SCOtopo.log.
+
+v0.61
+-----
+- Aligned right-side Advanced Geo Bias and Status frame margins with the Selection frame.
+
+v0.60
+-----
+- Fixed clean terrain template lookup for published distro runs.
+- Added generated-tiles clean terrain templates to the published application folder.
+
+v0.59
+-----
+- Restored Mode, Options, and Selection layout sizing.
+- Aligned Advanced Geo Bias with the top of Selection and Status with the bottom of Selection.
+
+v0.58
+-----
+- Moved Advanced Geo Bias below Options.
+- Bottom-aligned the Status frame beside the Selection frame.
+
+v0.57
+-----
+- Renamed the calibration panel to Advanced Geo Bias.
+- Reordered the bias controls as N/S then E/W and made positive values point left toward N/E.
+
+v0.56
+-----
+- Added GUI E/W and N/S geo bias controls in meters.
+- Applied geo bias to both normal route tiles and distant mountain tiles.
+
+v0.55
+-----
+- Moved SCOtopo.log to the user's Desktop.
+
+v0.54
+-----
+- Moved SCOtopo.log to the top-level distro folder beside README.txt.
+
+v0.53
+-----
+- Added BLURB.txt for file library descriptions.
+
+v0.52
+-----
+- Renamed distribution folder/zip to SCOtopo.
+- Added AddShortcutDesktop.cmd helper.
+
+v0.51
+-----
+- Added desktop shortcut suggestion to instructions.
+
+v0.50
+-----
+- Added SCOtopo application icon to executable and distro.
+
+v0.49
+-----
+- Added spacing between Track Database selection and radius controls.
+
+v0.48
+-----
+- Added starter distribution documentation.
+- Added GPLv3 license text and third-party notices.
+
+v0.47
+-----
+- Marker selection now uses ROUTE\[RouteName].mkr only.
+- KML selection now uses ROUTE\[RouteName].kml only.
+- Removed fallback to arbitrary marker/KML files.
+
+v0.46
+-----
+- Reordered GUI selection sources.
+- Added horizontal separator in Selection area.
+- Text File selection now processes exact listed tiles with no Tile Radius.
+
+v0.45
+-----
+- Built as Windows GUI executable to avoid console window for GUI launch.
+- Command-line testing remains available.
+
+v0.44
+-----
+- Added KML and Text File selection sources.
+- Added VERSION display in GUI.
+- Added GUI run logging to SCOtopo.log.
+- Added paste-ready failed-tile list for SCOtopoTiles.txt.
+
+Earlier test builds
+-------------------
+- Added TSRE-style distant mountain generation.
+- Added track database selection.
+- Added marker-based tile creation.
+- Added clean tile wipe repair option.
+- Added memory improvements for large routes.
+- Fixed terrain edge merging and tile metadata patching.

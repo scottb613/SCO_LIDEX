@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>SCOLIDEX</AssemblyName>
+    <Product>SCO LIDEX</Product>
+    <ApplicationIcon>SCOtopo.ico</ApplicationIcon>
+    <!-- FIX: Force the compiler to build for 64-bit to match GDAL -->
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MaxRev.Gdal.Universal" Version="3.13.1.534" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Saves\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="VERSION" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <Content Include="SCOtopo.ico" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <Content Include="content\ScoBull.png" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <Content Include="content\Contact.png" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <Content Include="generated-tiles\**\*.*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="generated-lo_tiles\**\*.*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

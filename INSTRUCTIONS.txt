@@ -1,0 +1,218 @@
+SCO LIDEX Instructions
+======================
+
+1. Back up your route
+---------------------
+Before running SCO LIDEX, make a full backup of the route folder. This is
+especially important before using Overwrite or Clean Tile Wipe.
+
+2. Start SCO LIDEX
+------------------
+Run SCOLIDEX.exe. The GUI should open without a console window.
+If SCO LIDEX is already running, a second launch will show a notice instead of
+opening another copy.
+
+Optional desktop shortcut:
+  1. Place the SCOLIDEX folder where you want to keep it.
+  2. Run AddShortcutDesktop.cmd from the top-level SCOLIDEX folder.
+  3. A desktop shortcut will be created for SCO LIDEX.
+
+The shortcut points to the application here:
+SCOLIDEX-win-x64\SCOLIDEX.exe
+
+3. Route Path
+-------------
+Paste the full route folder path into Route Path.
+
+Example:
+M:\OpenRails\Train Simulator\routes\MyRoute
+
+4. Mode
+-------
+Append:
+  Processes only tiles with no usable elevation data.
+
+Overwrite:
+  Rebuilds elevation for selected tiles even if they already contain elevation.
+  Existing texture, water, and overlay selections should be retained unless
+  Clean Tile Wipe is enabled.
+
+5. Options
+----------
+Create Route Tiles:
+  Builds or updates normal 8m terrain tiles.
+
+Create DM Tiles:
+  Builds or updates TSRE-style lo_tiles.
+  Existing DEMEX-style distant mountain tiles are incompatible with the TSRE
+  style used by SCO LIDEX. If detected during Run, they are purged and rebuilt
+  as TSRE-style lo_tiles.
+
+Clean Tile Wipe (Destructive):
+  Rebuilds terrain .t files from a clean template. This can repair corrupted
+  terrain tiles but may wipe texture, water, overlay, or other tile-specific
+  edits. Leave this off unless you are repairing damaged tiles. SCO LIDEX ships
+  clean terrain templates in the application folder. Scan checks that the clean
+  template is available before Run is enabled.
+
+Scan Override:
+  Disables the Scan button and allows Run immediately. Use this only when you
+  intentionally want to bypass the preflight checks.
+
+Help:
+  Opens this instruction file inside SCO LIDEX as a formatted, read-only
+  document. Text can be selected and copied, but the instructions cannot be
+  accidentally edited from the Help window.
+
+6. Selection
+------------
+Use Route Tiles:
+  Uses existing route terrain tiles.
+
+Use Text File:
+  Uses ROUTE\SCOLIDEXTiles.txt. This processes exactly the listed tiles and does
+  not use Tile Radius.
+
+  Format:
+  -04bea740
+  -04bea744
+  -04bea748
+
+Use Marker File:
+  Uses ROUTE\[RouteName].mkr. Tile Radius expands around each marker tile.
+
+Use KML File:
+  Uses ROUTE\[RouteName].kml. Tile Radius expands around KML-derived tiles.
+
+Use Track Database:
+  Uses ROUTE\[RouteName].tdb. Tile Radius expands around tiles referenced by
+  the track database.
+
+7. Radius
+---------
+Tile Radius:
+  Applies to Marker, KML, and Track Database selections.
+  Radius 0 means only the source tile.
+  Radius 1 means a 3x3 block around each source tile.
+  Radius 2 means a 5x5 block around each source tile.
+
+DM Radius:
+  Controls distant mountain coverage around the selected source.
+  Distant mountain tiles use 10m / 1/3 arc-second data.
+
+8. Normal terrain sampling
+--------------------------
+Open Rails normal terrain tiles use a 256x256 _y.raw height grid. Those are
+height posts spaced 8m apart. Because there are 255 spaces between 256 posts,
+the stored height-post span is 2040m inside a nominal 2048m tile.
+
+SCO LIDEX samples normal route terrain using that true 8m post spacing. This
+avoids stretching the 256 raw posts across the full tile footprint and should
+improve alignment with route/map overlays.
+
+Distant Mountain tiles are much lower resolution and still use their existing
+lo_tile sampling behavior.
+
+9. Advanced Geo Bias
+--------------------
+The N/S and E/W bias sliders shift terrain features in meters without moving
+the route tiles themselves. Positive values move terrain toward N or E, shown
+on the left side of each slider. Leave both at 0 unless you are calibrating a
+route.
+
+During Run, these values shift where SCO LIDEX samples DEM data for normal route
+tiles and distant mountain tiles. This is the most accurate way to apply a bias,
+because the terrain is built directly from the source DEM at the adjusted
+positions.
+
+The Commit button is a Post Processing tool for quick offset testing using
+existing terrain data only. Commit does not contact USGS and does not rebuild
+terrain from DEM. It rewrites selected existing _y.raw height grids. If Create
+Route Tiles is selected, normal terrain is shifted. If Create DM Tiles is
+selected, existing TSRE-style DM tiles are shifted.
+
+Post Processing is useful for finding the best offset after you notice a map or
+marker alignment issue. However, it resamples the existing fixed terrain grid.
+Normal route terrain is an 8m grid, so offsets that are not exact 8m multiples
+must be interpolated. This can slightly soften or distort sharp features, and
+repeated Post Processing shifts can compound that loss.
+
+Recommended workflow:
+  1. Build terrain with Advanced Geo Bias at 0.
+  2. If alignment looks off, use Commit / Post Processing to test offsets.
+  3. Once the best offset is known, rerun Run with that same Advanced Geo Bias
+     value to rebuild from source DEM for the most accurate mesh possible.
+
+Commit uses neighboring existing route tiles when the shift crosses a tile edge,
+then merges shared edges before writing. Back up your route before using Commit.
+
+10. TSRE alternate projection support
+------------------------------------
+Some TSRE routes include a TsreGeoProjection statement in the route .trk file.
+This is a TSRE route-centered projection used to reduce local map skew, often
+for routes where street grids or other urban features need to line up more
+squarely with map overlays.
+
+During Scan and Run, SCO LIDEX checks the .trk file for TsreGeoProjection.
+
+If TsreGeoProjection is not found:
+  SCO LIDEX uses the standard MSTS / Open Rails interrupted Goode homolosine
+  world-tile projection.
+
+If TsreGeoProjection is found:
+  SCO LIDEX logs "Alternate projection detection: TsreGeoProjection found" and
+  uses the TSRE route-centered projection for DEM sampling, route tile bounding
+  boxes, distant mountain sampling, Marker selection, and KML selection.
+
+The log also records the projection center and calculated meters-per-degree
+values so testers can confirm which projection path was used.
+
+This setting comes from TSRE and is route-specific. SCO LIDEX does not create
+or edit the TsreGeoProjection statement; it only reads and honors it when
+present.
+
+11. Logs and retry files
+-----------------------
+SCO LIDEX writes SCOLIDEX.log on the user's Desktop.
+The log records the selected GUI settings at the start of each Scan, Run, or
+Post Process operation and records elapsed time at the end of write operations.
+
+If the GUI fails before opening, SCO LIDEX writes a separate
+SCOLIDEX-startup-error.txt file on the user's Desktop.
+
+If normal terrain tiles fail during Run, SCO LIDEX marks retryable failed tiles
+so Append can try them again later. This is usually the easiest recovery path,
+especially for temporary USGS service or internet failures.
+
+For most retryable failures:
+  1. Wait a while if the log suggests USGS/service trouble.
+  2. Select Append.
+  3. Use the same route and selection options.
+  4. Run again.
+
+The log also prints a paste-ready block for targeted retries:
+
+Failed tiles for SCOLIDEXTiles.txt:
+# Paste the tile names below into ROUTE\SCOLIDEXTiles.txt and run Use Text File + Append.
+-04bea740
+-04bea744
+
+Copy those tile names into ROUTE\SCOLIDEXTiles.txt only if you want to retry a
+small specific set of tiles instead of running Append over the full selection.
+Then select Use Text File, select Append, and run again.
+
+Legacy SCOtopoTiles.txt files are still accepted, but new logs and examples use
+SCOLIDEXTiles.txt.
+
+If the log prints an "Unmappable failed tiles" block, those tile names are not
+paste-ready retries. SCO LIDEX could not match them to ORTS world tile
+coordinates.
+
+12. Reporting tester issues
+--------------------------
+When reporting a problem, include:
+- SCO LIDEX version number shown in the GUI.
+- The route name.
+- The options selected.
+- SCOLIDEX.log.
+- A screenshot if the issue is visual.
