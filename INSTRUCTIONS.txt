@@ -176,6 +176,9 @@ present.
 SCO LIDEX writes SCOLIDEX.log on the user's Desktop.
 The log records the selected GUI settings at the start of each Scan, Run, or
 Post Process operation and records elapsed time at the end of write operations.
+Run logs also include a human-readable USGS data-read total, such as 10.24 MB
+or 1.53 GB. This is a practical estimate based on USGS product JSON plus the
+DEM raster windows SCO LIDEX asks GDAL to read.
 
 If the GUI fails before opening, SCO LIDEX writes a separate
 SCOLIDEX-startup-error.txt file on the user's Desktop.

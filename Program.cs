@@ -1,3 +1,11 @@
+// SCO LIDEX - Open Rails / MSTS Cloud Terrain Builder
+// Copyright (C) Scott Brunner, Beast of Burden
+//
+// This file contains the terrain generation engine: route/tile discovery,
+// projection mapping, USGS DEM product lookup, GDAL raster sampling, seamless
+// tile merging, distant mountain generation, and command-line entry points.
+// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -8,6 +16,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Linq;
@@ -46,6 +55,13 @@ internal static partial class Program
     private const string PrimaryDemLabel = "1m";
     private const string IntermediateDemLabel = "5m~";
     private const string FallbackDemLabel = "10m";
+
+    // Counts the payload SCO LIDEX asks USGS/GDAL to provide during a run.
+    // GDAL does the actual /vsicurl/ network reads internally, so this is a
+    // practical transfer estimate based on product JSON bytes plus DEM raster
+    // window samples requested by ReadRaster.
+    private static long usgsDataBytesRead;
+
     private static readonly Dictionary<string, HashSet<string>> ProductUrlCache = new(StringComparer.OrdinalIgnoreCase);
     private static string? ProductUrlCachePath;
 
@@ -171,6 +187,45 @@ internal static partial class Program
         {
             return "";
         }
+    }
+
+    internal static void ResetUsgsDataCounter()
+    {
+        Interlocked.Exchange(ref usgsDataBytesRead, 0);
+    }
+
+    internal static long GetUsgsDataBytesRead()
+    {
+        return Interlocked.Read(ref usgsDataBytesRead);
+    }
+
+    internal static string FormatUsgsDataBytesRead()
+    {
+        return FormatByteCount(GetUsgsDataBytesRead());
+    }
+
+    private static void AddUsgsDataBytes(long byteCount)
+    {
+        if (byteCount > 0)
+        {
+            Interlocked.Add(ref usgsDataBytesRead, byteCount);
+        }
+    }
+
+    private static string FormatByteCount(long bytes)
+    {
+        string[] units = ["bytes", "KB", "MB", "GB", "TB"];
+        double value = bytes;
+        int unit = 0;
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        return unit == 0
+            ? $"{bytes:N0} {units[unit]}"
+            : $"{value:N2} {units[unit]}";
     }
 
     internal static async Task RunConsoleAsync(string[] args, CancellationToken cancellationToken)
@@ -405,6 +460,9 @@ internal static partial class Program
                 try
                 {
                     attempted++;
+                    // Generate the tile into memory first. The rolling writer holds
+                    // only nearby tile rows long enough to merge shared edges, then
+                    // flushes older rows so large routes do not keep every tile live.
                     TerrainGenerationResult result = await StreamOrtsGridForSampleGridAsync(httpClient, sampleGrid);
                     rollingWriter?.Add(new GeneratedTile(tile, result.Heights));
                     generatedCount++;
@@ -2771,7 +2829,7 @@ internal static partial class Program
                     string.Join(" | ", failures.Take(4)));
             }
 
-                Console.WriteLine($"  -> {PrimaryDemLabel} coverage left {missingAfterPrimary:N0} missing samples; trying {IntermediateDemLabel} fallback ({IntermediateDemDataset}).");
+            Console.WriteLine($"  -> {PrimaryDemLabel} coverage left {missingAfterPrimary:N0} missing samples; trying {IntermediateDemLabel} fallback ({IntermediateDemDataset}).");
             DemWindowSearchResult intermediateSearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, IntermediateDemDataset, failures);
             intermediateSamplesUsed = MergeWindows(intermediateSearch.Windows, mergedHeights);
             if (intermediateSearch.ProductSearchFailed)
@@ -2883,7 +2941,9 @@ internal static partial class Program
         {
             try
             {
-                return await client.GetStringAsync(apiUrl);
+                string response = await client.GetStringAsync(apiUrl);
+                AddUsgsDataBytes(Encoding.UTF8.GetByteCount(response));
+                return response;
             }
             catch (Exception ex) when (ex is TaskCanceledException or HttpRequestException)
             {
@@ -2961,6 +3021,9 @@ internal static partial class Program
                 string failure;
                 try
                 {
+                    // GDAL streams these remote files through /vsicurl/. SCO LIDEX
+                    // reads only the raster window needed for the current terrain
+                    // grid and records that requested window size in the run total.
                     readOk = TryReadDatasetSampleGrid(ds, sampleGrid, fillMissing: false, out heights, out missing, out failure);
                 }
                 catch (Exception ex)
@@ -3158,6 +3221,9 @@ internal static partial class Program
             return false;
         }
 
+        // Convert each route terrain post from lon/lat into the DEM's native
+        // pixel coordinates. One padded raster window is read, then each post
+        // is bilinearly sampled from that local window.
         using DatasetCoordinateMapper coordinateMapper = new(ds);
         int gridHeight = sampleGrid.Longitudes.GetLength(0);
         int gridWidth = sampleGrid.Longitudes.GetLength(1);
@@ -3203,6 +3269,7 @@ internal static partial class Program
         Band elevationBand = ds.GetRasterBand(1);
         float[] samples = new float[width * height];
         elevationBand.ReadRaster(xMin, yMin, width, height, samples, width, height, 0, 0);
+        AddUsgsDataBytes((long)width * height * sizeof(float));
 
         double? noData = TryGetNoDataValue(elevationBand);
         for (int y = 0; y < gridHeight; y++)

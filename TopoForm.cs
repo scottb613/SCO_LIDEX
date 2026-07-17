@@ -1,3 +1,10 @@
+// SCO LIDEX - WinForms Front End
+// Copyright (C) Scott Brunner, Beast of Burden
+//
+// This file contains the desktop interface, run/scan orchestration, live
+// status counters, logging, help/contact viewers, and post-processing controls.
+// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+
 using System;
 using System.Drawing;
 using System.Diagnostics;
@@ -1088,6 +1095,7 @@ internal sealed partial class TopoForm : Form
         using TextWriter writer = new UiTextWriter(AppendLog);
         Console.SetOut(writer);
         Console.SetError(writer);
+        Program.ResetUsgsDataCounter();
         Stopwatch runTimer = Stopwatch.StartNew();
 
         try
@@ -1102,7 +1110,9 @@ internal sealed partial class TopoForm : Form
         finally
         {
             runTimer.Stop();
-            AppendLog($"{Environment.NewLine}Elapsed time: {FormatElapsed(runTimer.Elapsed)}{Environment.NewLine}");
+            AppendLog(
+                $"{Environment.NewLine}Elapsed time: {FormatElapsed(runTimer.Elapsed)}{Environment.NewLine}" +
+                $"USGS data read: {Program.FormatUsgsDataBytesRead()}{Environment.NewLine}");
             Console.SetOut(previousOut);
             Console.SetError(previousError);
             logFileWriter?.Dispose();

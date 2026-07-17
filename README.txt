@@ -38,8 +38,8 @@ Primary features
 - Includes clean terrain tile templates for unsupported or clean-wipe tile rebuilds.
 - Scan verifies the clean terrain template is available when
   "Clean Tile Wipe (Destructive)" is selected.
-- Writes a run log with GUI settings and elapsed time to SCOLIDEX.log on the
-  user's Desktop.
+- Writes a run log with GUI settings, elapsed time, and a human-readable USGS
+  data-read total to SCOLIDEX.log on the user's Desktop.
 - Marks retryable failed normal terrain tiles so a later Append run can retry
   them automatically; paste-ready failed-tile lists are also provided for
   targeted Use Text File retries.
