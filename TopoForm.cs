@@ -293,6 +293,9 @@ internal sealed partial class TopoForm : Form
         SetRunning(false);
     }
 
+    // Build the top half of the form from small panels instead of the designer.
+    // That keeps the layout reproducible in source and avoids hidden .resx or
+    // designer state when sharing the project publicly.
     private Control BuildRoutePanel()
     {
         TableLayoutPanel panel = new()
@@ -502,6 +505,9 @@ internal sealed partial class TopoForm : Form
         return panel;
     }
 
+    // Bias controls serve two purposes: during Run they shift where DEM samples
+    // are taken from; during Commit/Post Processing they resample existing
+    // terrain only, which is faster but slightly less faithful than rerunning DEM.
     private Control BuildPostProcessPanel()
     {
         GroupBox postBox = new() { Text = "Advanced Geo Bias" };
@@ -811,6 +817,8 @@ internal sealed partial class TopoForm : Form
         }
     }
 
+    // Help is rendered in-app so users can read instructions without editing the
+    // text file by accident. INSTRUCTIONS.txt remains the single source content.
     private void ShowReadOnlyTextDocument(string title, string path)
     {
         string text = File.ReadAllText(path, Encoding.UTF8);
@@ -872,6 +880,8 @@ internal sealed partial class TopoForm : Form
         dialog.ShowDialog(this);
     }
 
+    // Tiny plain-text formatter: headings come from underline rules, indented
+    // numbered lines become bullets, and path/example lines use monospace text.
     private void FormatHelpDocument(RichTextBox box, string text)
     {
         box.SuspendLayout();
@@ -997,6 +1007,8 @@ internal sealed partial class TopoForm : Form
         return new Font("Segoe UI Semibold", size, FontStyle.Bold);
     }
 
+    // Scan is intentionally read-only. A passing scan locks the current settings
+    // so Run uses the same route/selection that was validated.
     private async void Scan_Click(object? sender, EventArgs e)
     {
         string routePath = NormalizeRoutePath(routePathText.Text);
@@ -1068,6 +1080,8 @@ internal sealed partial class TopoForm : Form
         }
     }
 
+    // Run redirects the engine's Console output into both the GUI log window and
+    // the desktop log file. The engine remains usable from the CLI for testing.
     private async void Run_Click(object? sender, EventArgs e)
     {
         if (!scanPassed && !scanOverride.Checked)
@@ -1251,6 +1265,8 @@ internal sealed partial class TopoForm : Form
         }
     }
 
+    // Convert GUI state to the same argument model used by CLI runs. Keeping one
+    // engine path prevents the GUI and command line from drifting apart.
     private string[] BuildRunArguments(string routePath)
     {
         List<string> args = [routePath, "--write"];
@@ -1403,6 +1419,8 @@ internal sealed partial class TopoForm : Form
         ApplyInteractiveState(runCancellation is not null, scanning);
     }
 
+    // Centralized enable/disable logic keeps Scan, Run, Abort, and Help behavior
+    // predictable during long terrain operations.
     private void ApplyInteractiveState(bool running, bool scanning)
     {
         bool busy = running || scanning;
@@ -1629,6 +1647,8 @@ internal sealed partial class TopoForm : Form
         }
     }
 
+    // The engine logs plain text; the GUI listens for stable progress/summary
+    // phrases and updates live counters without coupling to engine internals.
     private void ProcessStatusLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line))

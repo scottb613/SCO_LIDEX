@@ -5,6 +5,16 @@
 // projection mapping, USGS DEM product lookup, GDAL raster sampling, seamless
 // tile merging, distant mountain generation, and command-line entry points.
 // SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+//
+// USGS cloud endpoint used for DEM product discovery:
+//   https://tnmaccess.nationalmap.gov/api/v1/products
+//
+// Typical formatted request:
+//   https://tnmaccess.nationalmap.gov/api/v1/products?bbox=-75.294138,40.664608,-75.263146,40.682954&prodFormats=GeoTIFF&outputFormat=JSON&datasets=Digital%20Elevation%20Model%20%28DEM%29%201%20meter
+//
+// The JSON response supplies product downloadURL values. GDAL then streams only
+// the required GeoTIFF raster windows through /vsicurl/ instead of SCO LIDEX
+// downloading whole source DEM files.
 
 using System;
 using System.Collections.Generic;
@@ -228,6 +238,9 @@ internal static partial class Program
             : $"{value:N2} {units[unit]}";
     }
 
+    // Main terrain-build entry point used by both the CLI and the GUI wrapper.
+    // The GUI simply converts selected controls into command-line style args,
+    // redirects Console output into the log window, and lets this engine run.
     internal static async Task RunConsoleAsync(string[] args, CancellationToken cancellationToken)
     {
         Console.WriteLine("=========================================");
@@ -564,6 +577,8 @@ internal static partial class Program
         }
     }
 
+    // Read-only preflight. This validates the selected route/tile set and checks
+    // representative USGS product availability before Run is allowed to write.
     internal static async Task<ScanSummary> ScanRouteAsync(string routeDir, ScanOptions options, CancellationToken cancellationToken)
     {
         Console.WriteLine("=========================================");
@@ -800,6 +815,9 @@ internal static partial class Program
         return new ScanSummary(!blockingFailure, options.CreateRouteTiles ? processingTiles.Count : 0, options.CreateDistantMountains ? dmCoverage.Count : 0, unreadableRouteTiles, unreadableDmTiles);
     }
 
+    // Offset test tool. This does not contact USGS; it resamples existing _y.raw
+    // grids so a route builder can experiment with a bias before rerunning DEM
+    // generation with the chosen offset for the cleanest result.
     internal static Task PostProcessTerrainShiftAsync(
         string routeDir,
         PostProcessSelectionOptions options,
@@ -1486,6 +1504,8 @@ internal static partial class Program
         return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 
+    // Coverage helpers create any missing flat route tiles before DEM work starts.
+    // Radius-based sources expand from a center tile; text-file coverage is exact.
     private static void EnsureMarkerCoverageTiles(string routeDir, int terrainRadius)
     {
         if (string.IsNullOrWhiteSpace(routeDir) || !Directory.Exists(routeDir))
@@ -1994,6 +2014,9 @@ internal static partial class Program
         return string.Create(CultureInfo.InvariantCulture, $"w{tileX:+000000;-000000}{tileZ:+000000;-000000}.w");
     }
 
+    // TSRE-style distant mountains are normal route tiles grouped into 16x16
+    // coverage blocks. They use lower-resolution DEM data but are edge-merged
+    // the same way as normal tiles before the TSRE low-terrain index is rebuilt.
     private static async Task GenerateDistantMountainTilesAsync(
         RouteLayout route,
         HttpClient httpClient,
@@ -2808,6 +2831,10 @@ internal static partial class Program
         Console.WriteLine(mapper.ProjectionDetail);
     }
 
+    // Fill one ORTS 256-post terrain grid. The order is intentional:
+    // 1m first, then 5m~ Original Product Resolution, then 10m fallback.
+    // Failed 1m product searches are not treated as missing data because they
+    // are often temporary USGS/service issues; those tiles are left for Append.
     private static async Task<TerrainGenerationResult> StreamOrtsGridForSampleGridAsync(
         HttpClient client,
         GeoSampleGrid sampleGrid)
@@ -2861,6 +2888,8 @@ internal static partial class Program
         return new TerrainGenerationResult(mergedHeights, primarySamplesUsed, intermediateSamplesUsed, fallbackSamplesUsed, missingBeforeFill);
     }
 
+    // Ask USGS which GeoTIFF products overlap the route tile's bbox, filter the
+    // resulting URLs, then ask GDAL to read only the raster windows needed.
     private static async Task<DemWindowSearchResult> ReadDemWindowsForDatasetAsync(
         HttpClient client,
         GeoSampleGrid sampleGrid,
@@ -3414,6 +3443,9 @@ internal static partial class Program
         return (point[0], point[1]);
     }
 
+    // Wraps GDAL/OSR coordinate transformations for a source DEM. Each USGS
+    // product may have its own projection; this class maps WGS84 lon/lat sample
+    // posts into that raster's native coordinate system.
     private sealed class DatasetCoordinateMapper : IDisposable
     {
         private readonly SpatialReference? source;
@@ -3553,6 +3585,9 @@ internal static partial class Program
         }
     }
 
+    // Keeps only a small moving window of generated tiles in memory. A tile is
+    // written after its neighboring edges have had a chance to merge, avoiding
+    // full-route memory growth while preserving seamless transitions.
     private sealed class RollingTerrainWriter
     {
         private readonly string outputDir;
@@ -4236,6 +4271,9 @@ internal static partial class Program
     [GeneratedRegex(@"USGS_13_(?<cell>n\d+w\d+)_(?<date>\d{8})\.tif", RegexOptions.IgnoreCase)]
     private static partial Regex OneThirdArcSecondProductRegex();
 
+    // Route parser and tile-name bridge. This connects route markers, world
+    // files, terrain files, raw grids, RouteStart, and optional TSRE projection
+    // data into one structure the builder can reason about.
     private sealed partial class RouteLayout
     {
         private RouteLayout(
@@ -4611,6 +4649,9 @@ internal static partial class Program
 
     private sealed record TsreGeoProjection(double CenterLat, double CenterLon, double CenterX, double CenterZ);
 
+    // Converts ORTS world-tile coordinates into geographic sample grids. This is
+    // the heart of terrain alignment: it handles standard MSTS/Open Rails Goode
+    // homolosine mapping and TSRE's optional route-centered projection.
     private sealed class GeoTileMapper
     {
         private const double EarthRadiusMeters = 6_370_997.0;
@@ -5141,6 +5182,8 @@ internal static partial class Program
 
     private sealed record RawCornerRef(short[,] Grid, int X, int Y);
 
+    // Minimal writer for TSRE's low-terrain index files. Without this index,
+    // valid lo_tiles can exist on disk but not appear in TSRE's DM view.
     private sealed class TsreLowQuadTree
     {
         private const int RootLevel = 256;
@@ -5289,6 +5332,8 @@ internal static partial class Program
         }
     }
 
+    // Lightweight reader for external *_y.raw int16 terrain height grids.
+    // RawMissingHeight marks empty posts so Append can identify retryable tiles.
     private sealed class RawGrid
     {
         private RawGrid(short[,] heights)
