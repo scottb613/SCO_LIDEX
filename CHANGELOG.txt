@@ -1,6 +1,17 @@
 SCO LIDEX Changelog
 ===================
 
+v1.100
+------
+- Corrected standard-projection terrain placement by 16 meters east and
+  16 meters south to match the TSRE map-coordinate convention observed
+  consistently across multiple routes.
+- Applied the correction at geographic sampling time to both normal terrain
+  and Distant Mountain generation, preserving seamless tile transitions.
+- Left route-specific TsreGeoProjection mapping unchanged.
+- Added GEOMETRY_PLACEMENT_CORRECTION.txt with the source comparison and
+  technical explanation.
+
 v1.000
 ------
 - Finalized first public release version numbering.

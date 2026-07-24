@@ -120,6 +120,11 @@ the route tiles themselves. Positive values move terrain toward N or E, shown
 on the left side of each slider. Leave both at 0 unless you are calibrating a
 route.
 
+For standard-projection routes, v1.100 includes a built-in 16m east and 16m
+south compatibility correction for TSRE map alignment. A slider value of 0
+uses this corrected baseline. Any Advanced Geo Bias value is an additional
+route-specific adjustment.
+
 During Run, these values shift where SCO LIDEX samples DEM data for normal route
 tiles and distant mountain tiles. This is the most accurate way to apply a bias,
 because the terrain is built directly from the source DEM at the adjusted
@@ -157,12 +162,14 @@ During Scan and Run, SCO LIDEX checks the .trk file for TsreGeoProjection.
 
 If TsreGeoProjection is not found:
   SCO LIDEX uses the standard MSTS / Open Rails interrupted Goode homolosine
-  world-tile projection.
+  world-tile projection with the built-in 16m east and 16m south TSRE map
+  compatibility correction.
 
 If TsreGeoProjection is found:
   SCO LIDEX logs "Alternate projection detection: TsreGeoProjection found" and
   uses the TSRE route-centered projection for DEM sampling, route tile bounding
-  boxes, distant mountain sampling, Marker selection, and KML selection.
+  boxes, distant mountain sampling, Marker selection, and KML selection. The
+  standard-projection 16m correction is not applied.
 
 The log also records the projection center and calculated meters-per-degree
 values so testers can confirm which projection path was used.

@@ -4655,8 +4655,17 @@ internal static partial class Program
     private sealed class GeoTileMapper
     {
         private const double EarthRadiusMeters = 6_370_997.0;
-        private const double UpperLeftGoodeX = -20_013_965.0;
-        private const double UpperLeftGoodeY = 8_674_008.0;
+        private const double LegacyUpperLeftGoodeX = -20_013_965.0;
+        private const double LegacyUpperLeftGoodeY = 8_674_008.0;
+        private const double DefaultTerrainPlacementEastMeters = 16.0;
+        private const double DefaultTerrainPlacementNorthMeters = -16.0;
+        // TSRE's map overlay uses a slightly different IGH image origin than
+        // the older ORTS WorldLatLon converter. Sampling west/north by the
+        // opposite amount places generated terrain 16 m east and 16 m south.
+        private const double UpperLeftGoodeX =
+            LegacyUpperLeftGoodeX - DefaultTerrainPlacementEastMeters;
+        private const double UpperLeftGoodeY =
+            LegacyUpperLeftGoodeY - DefaultTerrainPlacementNorthMeters;
         private const double WorldTileEastWestOffset = -16_385.0;
         private const double WorldTileNorthSouthOffset = 16_385.0;
         private const double Epsilon = 0.0000000001;
@@ -4694,7 +4703,7 @@ internal static partial class Program
             : "TSRE route-centered projection";
 
         public string ProjectionDetail => tsreProjection is null
-            ? "TsreGeoProjection not detected; using standard MSTS/Open Rails tile geography."
+            ? $"TsreGeoProjection not detected; using standard MSTS/Open Rails tile geography with the TSRE map compatibility correction: terrain east={DefaultTerrainPlacementEastMeters:F0}m, south={-DefaultTerrainPlacementNorthMeters:F0}m."
             : $"TsreGeoProjection detected: center lat={tsreProjection.CenterLat:F6}, lon={tsreProjection.CenterLon:F6}, X={tsreProjection.CenterX:F0}, Z={tsreProjection.CenterZ:F0}; meters/degree lat={tsreStepLat:F3}, lon={tsreStepLon:F3}.";
 
         public double MinLon { get; private set; }

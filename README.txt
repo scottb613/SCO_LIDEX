@@ -12,6 +12,9 @@ Primary features
 - Samples normal terrain using the ORTS 256-post raw grid at true 8m post
   spacing, improving alignment with route/map overlays versus stretching the
   raw grid across the full nominal tile footprint.
+- Corrects standard-projection terrain placement by 16m east and 16m south
+  to match TSRE map overlays. Route-specific TsreGeoProjection routes are
+  handled separately and do not receive this standard correction.
 - Falls normal route tiles back through USGS Original Product Resolution DEM
   shown as 5m~, then USGS/NED 1/3 arc-second elevation shown as 10m.
 - Creates TSRE-style distant mountain lo_tiles from USGS/NED 1/3 arc-second elevation.
@@ -28,7 +31,8 @@ Primary features
   in-app viewer.
 - Prevents multiple GUI copies from running at the same time.
 - Includes meter-based E/W and N/S Advanced Geo Bias controls for route
-  calibration during DEM generation.
+  calibration during DEM generation. These values are additional to the
+  built-in standard-projection correction and should normally remain at zero.
 - Detects TSRE TsreGeoProjection entries in the route .trk file and uses that
   route-centered projection for DEM sampling when present.
 - Includes Commit / Post Processing for quick existing-terrain offset tests
