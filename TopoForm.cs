@@ -796,8 +796,11 @@ internal sealed partial class TopoForm : Form
         string[] candidates =
         [
             Path.Combine(AppContext.BaseDirectory, "INSTRUCTIONS.txt"),
+            Path.Combine(AppContext.BaseDirectory, "docs", "INSTRUCTIONS.txt"),
             Path.Combine(AppContext.BaseDirectory, "..", "INSTRUCTIONS.txt"),
+            Path.Combine(AppContext.BaseDirectory, "..", "docs", "INSTRUCTIONS.txt"),
             Path.Combine(Environment.CurrentDirectory, "INSTRUCTIONS.txt"),
+            Path.Combine(Environment.CurrentDirectory, "docs", "INSTRUCTIONS.txt"),
         ];
 
         string? helpPath = candidates.Select(Path.GetFullPath).FirstOrDefault(File.Exists);

@@ -29,6 +29,7 @@
     <Content Include="SCOtopo.ico" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
     <Content Include="content\ScoBull.png" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
     <Content Include="content\Contact.png" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <Content Include="docs\**\*.*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="generated-tiles\**\*.*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="generated-lo_tiles\**\*.*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

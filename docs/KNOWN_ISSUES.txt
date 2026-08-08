@@ -1,0 +1,24 @@
+SCO LIDEX Known Issues
+======================
+
+- USGS services may occasionally time out or fail for specific areas. Retry
+  later or use the failed-tile list with Use Text File + Append.
+
+- Routes outside USGS elevation coverage will not build useful terrain.
+
+- Clean Tile Wipe is destructive. It may remove tile-specific texture, water,
+  overlay, or other TSRE edits.
+
+- KML polygon handling is basic. Lines and coordinate paths are sampled, but
+  full polygon fill should be considered experimental.
+
+- Distant mountain appearance may vary between TSRE and Open Rails views.
+
+- Existing DEMEX-style distant mountain tiles are replaced during Run when
+  Create DM Tiles is selected.
+
+- Very large routes can take a long time. Start with Append or a small
+  SCOLIDEXTiles.txt test list when validating a new route.
+
+- Scan Override bypasses preflight checks. It is intended for advanced retry or
+  known-good cases, not first-time route validation.
