@@ -11,6 +11,7 @@ v1.100
 - Left route-specific TsreGeoProjection mapping unchanged.
 - Added GEOMETRY_PLACEMENT_CORRECTION.txt with the source comparison and
   technical explanation.
+- Aligned the Windows executable file and product metadata with version 1.100.
 
 v1.000
 ------

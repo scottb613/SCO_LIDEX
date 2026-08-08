@@ -8,6 +8,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>SCOLIDEX</AssemblyName>
     <Product>SCO LIDEX</Product>
+    <Version>1.100.0</Version>
+    <AssemblyVersion>1.100.0.0</AssemblyVersion>
+    <FileVersion>1.100.0.0</FileVersion>
     <ApplicationIcon>SCOtopo.ico</ApplicationIcon>
     <!-- FIX: Force the compiler to build for 64-bit to match GDAL -->
     <PlatformTarget>x64</PlatformTarget>
