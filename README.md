@@ -2,7 +2,7 @@
 
 SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route developers. It discovers route coverage, obtains USGS or global Copernicus elevation data, builds normal terrain and optional TSRE-style distant mountains, validates the work, and writes terrain back into an existing route.
 
-> **Release status:** `main` contains v1.200. The previous published release is [v1.100](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.100).
+> **Latest release:** [v1.200](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.200).
 
 ## Release Highlights
 

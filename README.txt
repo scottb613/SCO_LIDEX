@@ -7,7 +7,7 @@ elevation data, builds normal terrain and optional TSRE-style distant
 mountains, validates the work,
 and writes terrain back into an existing route.
 
-Release status: main contains v1.200. The previous published release is v1.100.
+Latest release: v1.200.
 
 Release highlights
 ==================
