@@ -25,7 +25,7 @@ internal static class UiSounds
         }
     }
 
-    internal static void PlayClick()
+    internal static void PlayProgress()
     {
         lock (SyncRoot)
         {
@@ -36,11 +36,11 @@ internal static class UiSounds
                 return;
             }
 
-            PlayLocked("SCOclick.wav");
+            PlayLocked("SCOprogress.wav");
         }
     }
 
-    internal static void PlayChirp() => Play("SCOchirp.wav");
+    internal static void PlaySuccess() => Play("SCOsuccess.wav");
 
     internal static void PlayBuzz() => Play("SCObuzz.wav");
 

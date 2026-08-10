@@ -155,7 +155,7 @@ internal static partial class Program
         return windows;
     }
 
-    private static async Task<bool> TestCopernicusDatasetAsync(
+    private static async Task<SourceAvailability> TestCopernicusDatasetAsync(
         HttpClient client,
         GeoSampleGrid sampleGrid,
         CancellationToken cancellationToken)
@@ -164,7 +164,7 @@ internal static partial class Program
         if (candidates.Count == 0)
         {
             Console.WriteLine($"{GlobalDemLabel} ({GlobalDemDisplayName}): unavailable for the representative bbox.");
-            return false;
+            return new SourceAvailability(true, false, "no land COG candidate for the representative bbox");
         }
 
         List<string> failures = [];
@@ -182,7 +182,7 @@ internal static partial class Program
                     Console.WriteLine(
                         $"{GlobalDemLabel} ({GlobalDemDisplayName}): active, anonymous AWS COG available " +
                         $"for representative bbox ({representative.Name}).");
-                    return true;
+                    return new SourceAvailability(true, true, $"anonymous AWS COG available ({representative.Name})");
                 }
 
                 failures.Add($"{representative.Name}: {(int)response.StatusCode} {response.ReasonPhrase}");
@@ -193,7 +193,8 @@ internal static partial class Program
             }
         }
 
-        if (failures.All(failure => failure.Contains("404", StringComparison.OrdinalIgnoreCase)))
+        bool noCoverage = failures.All(failure => failure.Contains("404", StringComparison.OrdinalIgnoreCase));
+        if (noCoverage)
         {
             Console.WriteLine(
                 $"{GlobalDemLabel} ({GlobalDemDisplayName}): no land COG published for representative bbox; " +
@@ -205,7 +206,9 @@ internal static partial class Program
                 $"{GlobalDemLabel} ({GlobalDemDisplayName}): FAILED ({string.Join(" | ", failures.Take(3))}).");
         }
 
-        return false;
+        return noCoverage
+            ? new SourceAvailability(true, false, "no land COG published; coverage may be ocean-only")
+            : new SourceAvailability(false, false, string.Join(" | ", failures.Take(3)));
     }
 
     private static IReadOnlyList<CopernicusCogTile> GetCopernicusCogTiles(GeoSampleGrid sampleGrid)

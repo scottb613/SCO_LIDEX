@@ -3,6 +3,38 @@ SCO LIDEX Changelog
 
 v1.200
 ------
+- Changed Scan from all-or-nothing service gating to a per-source capability
+  plan covering USGS 1m, 5m~, 10m, Copernicus 30m global, and Geofabrik maps.
+- Added a final source-status and Run-plan summary. Individual outages remain
+  clearly marked FAILED, while a usable fallback produces PASSED WITH WARNINGS
+  and enables Run for the viable selected stages.
+- Source results use separate Data, Source, and PASSED/FAILED lines for easier
+  reading in both Scan and Run logs.
+- Added explicit USGS detail in Scan and Run so SERVICE ONLINE / NO ROUTE
+  COVERAGE cannot be mistaken for a service outage.
+- A malformed USGS product response no longer prevents Copernicus fallback.
+- Corrected GUI status parsing so Data Source `Status: FAILED` lines remain
+  informational and cannot suppress the final operation-complete state.
+- Added explicit terrain, Distant Mountain, and OSM/map completion statuses.
+- Moved downloaded Geofabrik PBF extracts into each route's
+  OpenStreetMap\geofabrik folder and added a portable osm-cache.json manifest.
+- Added verified migration of matching legacy AppData PBF and partial-download
+  data so existing large downloads are reused rather than fetched again.
+- Added an AppData cache-registry-v1.json index for discovering route-local
+  caches while keeping the route manifest authoritative.
+- Replaced whole-cache exit deletion with unchecked per-cache selections for
+  regional extracts and incomplete downloads. The small shared Geofabrik index
+  remains internal application data and is never offered for deletion.
+- Purge Selected with no checked cache now plays the failure buzz, deletes
+  nothing, and keeps the exit dialog open.
+- Classified generated terrain_maps PNG files as permanent route output; cache
+  cleanup never lists, deletes, or removes those map images or their folder.
+- Sources that fail or report no representative coverage during Scan are not
+  polled during the following Run. Copernicus can carry global terrain and DM
+  work independently of USGS availability.
+- A Geofabrik outage no longer blocks terrain or DM. Map generation uses a
+  usable cached regional index/PBF without polling the failed service, or skips
+  only the map stage when no valid cache exists.
 - Added immediate SCANNING status and a one-second working indicator that cycles
   active statuses through zero, one, two, and three real bullets on each side.
   Completion, failure, error, abort, and ready states remain fixed.
@@ -14,6 +46,8 @@ v1.200
 - Added non-overlapping interface audio for button presses, checkbox/radio
   selections, ordinary status changes, successful Scan/Run completion, and
   failure/error/abort indications.
+- Assigned SCOprogress to ordinary status messages and SCOsuccess to successful
+  Scan and Run completion.
   All supplied WAV assets are retained in source and distribution output.
 - Expanded the center message panel to report Scan, terrain-source, DM, OSM
   download/processing/rendering, completion, failure, and abort stages using one

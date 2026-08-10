@@ -68,32 +68,31 @@ internal static partial class Program
     // Fill one ORTS 256-post terrain grid. The order is intentional:
     // 1m first, then 5m~ Original Product Resolution, 10m, and finally the
     // key-free Copernicus 30m global source for posts outside US coverage.
-    // Failed 1m product searches are not treated as missing data because they
-    // are often temporary USGS/service issues; those tiles are left for Append.
+    // A failed source lookup is treated as unavailable for that tile so the
+    // remaining configured sources, including Copernicus, can still be used.
     private static async Task<TerrainGenerationResult> StreamOrtsGridForSampleGridAsync(
         HttpClient client,
-        GeoSampleGrid sampleGrid)
+        GeoSampleGrid sampleGrid,
+        DemSourcePolicy sourcePolicy)
     {
         List<string> failures = [];
         int gridHeight = sampleGrid.Longitudes.GetLength(0);
         int gridWidth = sampleGrid.Longitudes.GetLength(1);
         short[,] mergedHeights = CreateMissingHeightGrid(gridWidth, gridHeight);
-        DemWindowSearchResult primarySearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, PrimaryDemDataset, failures);
-        int primarySamplesUsed = MergeWindows(primarySearch.Windows, mergedHeights);
+        DemWindowSearchResult primarySearch = new([], ProductSearchFailed: false);
+        int primarySamplesUsed = 0;
+        if (sourcePolicy.UsePrimary)
+        {
+            primarySearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, PrimaryDemDataset, failures);
+            primarySamplesUsed = MergeWindows(primarySearch.Windows, mergedHeights);
+        }
 
         int missingAfterPrimary = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
         int intermediateSamplesUsed = 0;
         int fallbackSamplesUsed = 0;
         int globalSamplesUsed = 0;
-        if (missingAfterPrimary > 0)
+        if (missingAfterPrimary > 0 && sourcePolicy.UseIntermediate)
         {
-            if (primarySearch.ProductSearchFailed)
-            {
-                throw new InvalidOperationException(
-                    $"1m USGS product search failed, so this tile was left for a later append retry instead of falling back to lower-resolution data. " +
-                    string.Join(" | ", failures.Take(4)));
-            }
-
             Console.WriteLine($"  -> {PrimaryDemLabel} coverage left {missingAfterPrimary:N0} missing samples; trying {IntermediateDemLabel} fallback ({IntermediateDemDataset}).");
             DemWindowSearchResult intermediateSearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, IntermediateDemDataset, failures);
             intermediateSamplesUsed = MergeWindows(intermediateSearch.Windows, mergedHeights);
@@ -104,7 +103,7 @@ internal static partial class Program
         }
 
         int missingAfterIntermediate = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
-        if (missingAfterIntermediate > 0)
+        if (missingAfterIntermediate > 0 && sourcePolicy.UseFallback)
         {
             Console.WriteLine($"  -> {IntermediateDemLabel} coverage left {missingAfterIntermediate:N0} missing samples; trying {FallbackDemLabel} fallback ({FallbackDemDataset}).");
             DemWindowSearchResult fallbackSearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, FallbackDemDataset, failures);
@@ -112,7 +111,7 @@ internal static partial class Program
         }
 
         int missingAfterFallback = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
-        if (missingAfterFallback > 0)
+        if (missingAfterFallback > 0 && sourcePolicy.UseGlobal)
         {
             Console.WriteLine(
                 $"  -> {FallbackDemLabel} coverage left {missingAfterFallback:N0} missing samples; " +
@@ -171,42 +170,58 @@ internal static partial class Program
                 ProductSearchFailed: true);
         }
 
-        using JsonDocument doc = ParseUsgsProductJson(jsonResponse);
-        if (!doc.RootElement.TryGetProperty("items", out JsonElement items))
+        JsonDocument doc;
+        try
         {
-            throw new InvalidOperationException("USGS product service response did not include an items list.");
+            doc = ParseUsgsProductJson(jsonResponse);
+        }
+        catch (InvalidOperationException ex)
+        {
+            failures.Add($"{datasetName} product search returned unusable data: {ex.Message}");
+            Console.WriteLine($"  -> USGS {GetDemSourceDisplayName(datasetName)} returned unusable data; continuing to the next DEM source.");
+            return new DemWindowSearchResult([], ProductSearchFailed: true);
         }
 
-        if (items.GetArrayLength() == 0)
+        using (doc)
         {
-            failures.Add($"No {GetDemSourceDisplayName(datasetName)} product found for tile bbox lon {minLon:F6}..{maxLon:F6}, lat {minLat:F6}..{maxLat:F6}.");
-            return new DemWindowSearchResult([], ProductSearchFailed: false);
-        }
-
-        List<string> urls = [];
-        foreach (JsonElement item in items.EnumerateArray())
-        {
-            if (item.TryGetProperty("downloadURL", out JsonElement urlElement))
+            if (!doc.RootElement.TryGetProperty("items", out JsonElement items) || items.ValueKind != JsonValueKind.Array)
             {
-                string? url = urlElement.GetString();
-                if (!string.IsNullOrWhiteSpace(url))
+                failures.Add($"{datasetName} product search response did not contain a usable items list.");
+                Console.WriteLine($"  -> USGS {GetDemSourceDisplayName(datasetName)} returned no usable items list; continuing to the next DEM source.");
+                return new DemWindowSearchResult([], ProductSearchFailed: true);
+            }
+
+            if (items.GetArrayLength() == 0)
+            {
+                failures.Add($"No {GetDemSourceDisplayName(datasetName)} product found for tile bbox lon {minLon:F6}..{maxLon:F6}, lat {minLat:F6}..{maxLat:F6}.");
+                return new DemWindowSearchResult([], ProductSearchFailed: false);
+            }
+
+            List<string> urls = [];
+            foreach (JsonElement item in items.EnumerateArray())
+            {
+                if (item.TryGetProperty("downloadURL", out JsonElement urlElement))
                 {
-                    urls.Add(url);
+                    string? url = urlElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        urls.Add(url);
+                    }
                 }
             }
-        }
 
-        if (urls.Count == 0)
-        {
-            failures.Add($"USGS found {GetDemSourceDisplayName(datasetName)} products but none had a downloadable GeoTIFF URL.");
-            return new DemWindowSearchResult([], ProductSearchFailed: false);
-        }
+            if (urls.Count == 0)
+            {
+                failures.Add($"USGS found {GetDemSourceDisplayName(datasetName)} products but none had a downloadable GeoTIFF URL.");
+                return new DemWindowSearchResult([], ProductSearchFailed: false);
+            }
 
-        urls = FilterDemProductUrls(datasetName, urls);
-        AddCachedProductUrls(datasetName, urls);
-        return new DemWindowSearchResult(
-            ReadDemWindowsFromUrls(urls, datasetName, sampleGrid, failures),
-            ProductSearchFailed: false);
+            urls = FilterDemProductUrls(datasetName, urls);
+            AddCachedProductUrls(datasetName, urls);
+            return new DemWindowSearchResult(
+                ReadDemWindowsFromUrls(urls, datasetName, sampleGrid, failures),
+                ProductSearchFailed: false);
+        }
     }
 
     private static async Task<string> GetStringWithRetryAsync(HttpClient client, string apiUrl, string datasetName)
@@ -1543,7 +1558,9 @@ internal static partial class Program
         int GlobalSamplesUsed,
         int NeighborFilledSamples);
 
-    private sealed record UsgsDatasetAvailability(bool ServiceAvailable, int ItemCount);
+    private sealed record UsgsDatasetAvailability(bool ServiceAvailable, int ItemCount, string Detail);
+
+    private sealed record SourceAvailability(bool ServiceAvailable, bool CoverageAvailable, string Detail);
 
     private sealed record GeoSampleGrid(
         double[,] Longitudes,

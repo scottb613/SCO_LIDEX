@@ -62,9 +62,39 @@ Create Map Tiles:
   download the regional PBF or modify the route.
 
   Run asks for confirmation before downloading. The anonymous Geofabrik PBF is
-  resumable and cached under LocalAppData\SCOLIDEX\map-data. When SCO LIDEX
-  exits, it reports the exact cache size and offers Keep Cache, Purge Cache,
-  or Cancel Exit.
+  resumable and stored with the route:
+
+  <Route>\OpenStreetMap\geofabrik\<region-id>.osm.pbf
+
+  SCO LIDEX also writes <Route>\OpenStreetMap\osm-cache.json. The manifest
+  identifies the provider, region, URL, source date, expected size, geographic
+  bounds, relative PBF path, and creating version so LIDEX or future route tools
+  can validate and reuse the extract.
+
+  A matching legacy PBF under LocalAppData\SCOLIDEX\map-data is copied and
+  verified into the route, then the legacy copy is removed. Interrupted
+  downloads use a .part file beside the final route-local PBF. If the route
+  cache cannot be written, LIDEX retains AppData as a compatibility fallback.
+
+  The small shared Geofabrik index remains under
+  %LocalAppData%\SCOLIDEX\map-data. A
+  %LocalAppData%\SCOLIDEX\cache-registry-v1.json registry records known route
+  cache locations. The route manifest remains authoritative if the registry is
+  lost or rebuilt.
+
+  On exit, SCO LIDEX lists every known purgeable OSM data cache separately:
+  regional PBFs and incomplete downloads. Every purge checkbox is clear by
+  default. The small shared Geofabrik index is internal application data and is
+  never offered for deletion. Select only the OSM caches to remove, then choose
+  Purge Selected; Keep All leaves every cache untouched, and Cancel Exit
+  returns to the application.
+
+  Purge Selected remains available when nothing is checked. In that case it
+  plays the failure buzz, deletes nothing, and keeps the exit dialog open.
+
+  Generated terrain_maps PNG files are route output, not purgeable OSM cache.
+  SCO LIDEX never offers those images for deletion and never removes the
+  terrain_maps folder during cache cleanup.
   SCO LIDEX does not use the bulk-restricted public OpenStreetMap editing API.
 
   Each map is written to TSRE's F3 terrain_maps\<tile-hash>.png cache using the
@@ -102,6 +132,25 @@ Clean Tile Wipe (Destructive):
   edits. Leave this off unless you are repairing damaged tiles. SCO LIDEX ships
   clean terrain templates in the application folder. Scan checks that the clean
   template is available before Run is enabled.
+
+Scan source handling:
+  Scan tests and reports USGS 1m, 5m~, and 10m, Copernicus 30m global, and the
+  Geofabrik map source separately. The final SCAN SOURCE STATUS block preserves
+  FAILED indications and prints the exact Run plan. The Details line clearly
+  distinguishes SERVICE UNAVAILABLE from SERVICE ONLINE / NO ROUTE COVERAGE in
+  both Scan and the following Run.
+
+  Scan can pass with warnings when another source can complete useful selected
+  work. For example, accessible Copernicus coverage enables global normal and
+  Distant Mountain terrain when USGS is unavailable. Failed USGS services and
+  sources with no representative coverage are disabled for that Run and are not
+  polled again tile by tile.
+
+  Geofabrik failure does not block normal terrain or Distant Mountains. Maps can
+  still run from a usable cached regional index and PBF extract. If no valid map
+  cache exists, only the map stage is skipped and its failure remains visible in
+  the Scan summary. Run is disabled only when no selected production stage has a
+  viable source path or a route/file validation error is blocking.
 
 Scan Override:
   Disables the Scan button and allows Run immediately. Use this only when you
@@ -276,8 +325,8 @@ The message panel between Exit and Contact reports the active production stage:
 Interface sounds follow the same production states:
 - SCOpress plays for application button presses.
 - SCOtic plays for checkbox and radio-button selections.
-- SCOclick plays for ordinary message-panel stage changes.
-- SCOchirp plays when Scan or Run completes successfully.
+- SCOprogress plays for ordinary message-panel stage changes.
+- SCOsuccess plays when Scan or Run completes successfully.
 - SCObuzz plays for failure, error, or abort indications.
 
 Sound playback is centralized so events do not overlap or produce dual sounds.

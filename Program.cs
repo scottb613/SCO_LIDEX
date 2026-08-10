@@ -95,12 +95,32 @@ internal static partial class Program
         int TerrainRadius,
         int LoTileRadius);
 
+    internal sealed record DemSourcePolicy(
+        bool UsePrimary,
+        bool UseIntermediate,
+        bool UseFallback,
+        bool UseGlobal)
+    {
+        internal static DemSourcePolicy All { get; } = new(true, true, true, true);
+        internal static DemSourcePolicy None { get; } = new(false, false, false, false);
+        internal bool HasAny => UsePrimary || UseIntermediate || UseFallback || UseGlobal;
+    }
+
     internal sealed record ScanSummary(
         bool CanRun,
         int RouteTileTotal,
         int DistantMountainTotal,
         int UnreadableRouteTiles,
-        int UnreadableDistantMountainTiles);
+        int UnreadableDistantMountainTiles,
+        bool HasWarnings,
+        DemSourcePolicy DemSources,
+        bool PrimaryServiceAvailable,
+        bool IntermediateServiceAvailable,
+        bool FallbackServiceAvailable,
+        bool RouteCanRun,
+        bool DistantMountainCanRun,
+        bool MapCanRun,
+        bool MapCacheOnly);
 
     internal sealed record PostProcessSelectionOptions(
         bool ShiftRouteTiles,
@@ -283,6 +303,18 @@ internal static partial class Program
         bool createRouteTiles = !args.Contains("--no-route-tiles", StringComparer.OrdinalIgnoreCase);
         bool cleanTileTemplate = args.Contains("--clean-tile-template", StringComparer.OrdinalIgnoreCase);
         bool createMapTiles = args.Contains("--map-tiles", StringComparer.OrdinalIgnoreCase);
+        bool mapCacheOnly = args.Contains("--map-cache-only", StringComparer.OrdinalIgnoreCase);
+        bool routeSkippedByScan = args.Contains("--scan-skipped-route", StringComparer.OrdinalIgnoreCase);
+        bool distantMountainsSkippedByScan = args.Contains("--scan-skipped-dm", StringComparer.OrdinalIgnoreCase);
+        bool mapsSkippedByScan = args.Contains("--scan-skipped-maps", StringComparer.OrdinalIgnoreCase);
+        bool primaryServiceAvailable = args.Contains("--usgs-1m-service-online", StringComparer.OrdinalIgnoreCase);
+        bool intermediateServiceAvailable = args.Contains("--usgs-5m-service-online", StringComparer.OrdinalIgnoreCase);
+        bool fallbackServiceAvailable = args.Contains("--usgs-10m-service-online", StringComparer.OrdinalIgnoreCase);
+        DemSourcePolicy demSources = new(
+            !args.Contains("--skip-usgs-1m", StringComparer.OrdinalIgnoreCase),
+            !args.Contains("--skip-usgs-5m", StringComparer.OrdinalIgnoreCase),
+            !args.Contains("--skip-usgs-10m", StringComparer.OrdinalIgnoreCase),
+            !args.Contains("--skip-copernicus", StringComparer.OrdinalIgnoreCase));
         bool experimental4mTest = args.Contains("--experimental-4m-test", StringComparer.OrdinalIgnoreCase);
         if (experimental4mTest && !Experimental4mExportEnabled)
         {
@@ -415,6 +447,34 @@ internal static partial class Program
         Gdal.SetConfigOption("GDAL_HTTP_UNSAFESSL", "YES");
 
         using HttpClient httpClient = new() { Timeout = TimeSpan.FromMinutes(4) };
+        Console.WriteLine("\n=========================================");
+        Console.WriteLine(" RUN DATA SOURCE STATUS ");
+        Console.WriteLine("=========================================");
+        PrintDataSourceStatus("Terrain DEM - 1m", "USGS - The National Map", demSources.UsePrimary);
+        Console.WriteLine($"Details: {FormatUsgsRunDetail(demSources.UsePrimary, primaryServiceAvailable)}");
+        PrintDataSourceStatus("Terrain DEM - approximately 5m", "USGS - The National Map", demSources.UseIntermediate);
+        Console.WriteLine($"Details: {FormatUsgsRunDetail(demSources.UseIntermediate, intermediateServiceAvailable)}");
+        PrintDataSourceStatus("Terrain DEM - 10m", "USGS - The National Map", demSources.UseFallback);
+        Console.WriteLine($"Details: {FormatUsgsRunDetail(demSources.UseFallback, fallbackServiceAvailable)}");
+        PrintDataSourceStatus("Global terrain DEM - 30m", "Copernicus GLO-30", demSources.UseGlobal);
+        if (createMapTiles)
+        {
+            PrintDataSourceStatus(
+                "OpenStreetMap regional extract",
+                mapCacheOnly ? "Local Geofabrik PBF cache" : "Geofabrik",
+                true);
+            Console.WriteLine(mapCacheOnly
+                ? "Details: cached map extract will be used; Geofabrik will not be polled."
+                : "Details: Geofabrik remote source is enabled with local-cache fallback.");
+        }
+        else if (mapsSkippedByScan)
+        {
+            PrintDataSourceStatus("OpenStreetMap regional extract", "Geofabrik", false);
+            Console.WriteLine("Details: Scan found neither a usable remote source nor a usable cached PBF.");
+        }
+        if (routeSkippedByScan) Console.WriteLine("Run stage plan: normal terrain SKIPPED because Scan found no viable DEM source.");
+        if (distantMountainsSkippedByScan) Console.WriteLine("Run stage plan: Distant Mountains SKIPPED because Scan found no viable 10m/global DEM source.");
+        if (mapsSkippedByScan) Console.WriteLine("Run stage plan: map overlays SKIPPED because Geofabrik and the local PBF cache were unavailable during Scan.");
         RollingTerrainWriter? rollingWriter = null;
         int generatedCount = 0;
         int attempted = 0;
@@ -463,6 +523,7 @@ internal static partial class Program
                 outputDir,
                 sourceBiasEastMeters,
                 sourceBiasNorthMeters,
+                demSources,
                 cancellationToken);
             if (!completed)
             {
@@ -474,7 +535,7 @@ internal static partial class Program
             {
                 try
                 {
-                    await GenerateMapTilesAsync(route, mapper, route.TerrainTiles, requestedMapTile, limit, cancellationToken);
+                    await GenerateMapTilesAsync(route, mapper, route.TerrainTiles, requestedMapTile, limit, mapCacheOnly, cancellationToken);
                 }
                 catch
                 {
@@ -561,7 +622,7 @@ internal static partial class Program
                     // Generate the tile into memory first. The rolling writer holds
                     // only nearby tile rows long enough to merge shared edges, then
                     // flushes older rows so large routes do not keep every tile live.
-                    TerrainGenerationResult result = await StreamOrtsGridForSampleGridAsync(httpClient, sampleGrid);
+                    TerrainGenerationResult result = await StreamOrtsGridForSampleGridAsync(httpClient, sampleGrid, demSources);
                     Console.WriteLine(result.GlobalSamplesUsed > 0
                         ? "STATUS: TILES - GLOBAL - LOW RES"
                         : "STATUS: TILES - US - HIGH RES");
@@ -669,12 +730,17 @@ internal static partial class Program
             return;
         }
 
+        if (createRouteTiles && !inspectOnly)
+        {
+            Console.WriteLine("STATUS: TILES - COMPLETE");
+        }
+
         if (distantMountains)
         {
             string loOutputDir = inspectOnly
                 ? Path.Combine(Environment.CurrentDirectory, "generated-lo_tiles")
                 : Path.Combine(route.RouteDir, "lo_tiles");
-            int dmFailures = await GenerateDistantMountainTilesAsync(route, httpClient, loOutputDir, loTileRadius, loSampleOffsetX, loSampleOffsetY, sourceBiasEastMeters, sourceBiasNorthMeters, markerCoverage, trackDatabaseCoverage, kmlCoverage, textFileCoverage, overwriteFlag, cancellationToken);
+            int dmFailures = await GenerateDistantMountainTilesAsync(route, httpClient, loOutputDir, loTileRadius, loSampleOffsetX, loSampleOffsetY, sourceBiasEastMeters, sourceBiasNorthMeters, markerCoverage, trackDatabaseCoverage, kmlCoverage, textFileCoverage, overwriteFlag, demSources, cancellationToken);
             if (cancellationToken.IsCancellationRequested)
             {
                 Console.WriteLine("STATUS: OPERATION ABORTED");
@@ -687,6 +753,8 @@ internal static partial class Program
                 Console.WriteLine("STATUS: FAILURE - DISTANT MOUNTAINS");
                 return;
             }
+
+            Console.WriteLine("STATUS: DISTANT MOUNTAINS - COMPLETE");
         }
 
         if (createMapTiles && !inspectOnly)
@@ -699,7 +767,7 @@ internal static partial class Program
             {
                 try
                 {
-                    await GenerateMapTilesAsync(route, mapper, processingTiles, requestedMapTile, limit, cancellationToken);
+                    await GenerateMapTilesAsync(route, mapper, processingTiles, requestedMapTile, limit, mapCacheOnly, cancellationToken);
                 }
                 catch
                 {
@@ -721,6 +789,8 @@ internal static partial class Program
             Console.WriteLine($"Resolution summary: {PrimaryDemLabel} only={builtWithPrimaryOnly:N0}, mixed {PrimaryDemLabel}+{IntermediateDemLabel}={builtWithPrimaryAndIntermediate:N0}, mixed {PrimaryDemLabel}+{FallbackDemLabel}={builtWithPrimaryAndFallback:N0}, {IntermediateDemLabel} only={builtWithIntermediateOnly:N0}, mixed {IntermediateDemLabel}+{FallbackDemLabel}={builtWithIntermediateAndFallback:N0}, {FallbackDemLabel} only={builtWithFallbackOnly:N0}, tiles including {GlobalDemLabel}={builtWithGlobal:N0}, neighbor-filled={builtWithNeighborFill:N0}.");
             Console.WriteLine($"Source use summary: tiles using {PrimaryDemLabel}={tilesUsingPrimary:N0}, {IntermediateDemLabel}={tilesUsingIntermediate:N0}, {FallbackDemLabel}={tilesUsingFallback:N0}, {GlobalDemLabel}={tilesUsingGlobal:N0}.");
         }
+
+        Console.WriteLine("STATUS: OPERATION COMPLETE");
     }
 
     // Read-only preflight. This validates the selected route/tile set and checks
@@ -739,7 +809,7 @@ internal static partial class Program
         if (!RouteLayout.TryLoad(routeDir, out RouteLayout? route, out string routeError))
         {
             Console.WriteLine(routeError);
-            return new ScanSummary(false, 0, 0, 0, 0);
+            return new ScanSummary(false, 0, 0, 0, 0, false, DemSourcePolicy.None, false, false, false, false, false, false, false);
         }
 
         PrintRouteSummary(route!);
@@ -748,7 +818,7 @@ internal static partial class Program
         if (selectionSources > 1)
         {
             Console.WriteLine("Error: choose only one selection source.");
-            return new ScanSummary(false, 0, 0, 0, 0);
+            return new ScanSummary(false, 0, 0, 0, 0, false, DemSourcePolicy.None, false, false, false, false, false, false, false);
         }
 
         IReadOnlyList<TerrainTile> processingTiles = [];
@@ -933,6 +1003,16 @@ internal static partial class Program
             blockingFailure = true;
         }
 
+        bool hasWarnings = false;
+        DemSourcePolicy demSources = DemSourcePolicy.None;
+        bool routeCanRun = false;
+        bool distantMountainCanRun = false;
+        MapSourceAvailability mapSource = new(false, false, false, "not selected");
+        UsgsDatasetAvailability primaryStatus = new(false, 0, "not tested");
+        UsgsDatasetAvailability intermediateStatus = new(false, 0, "not tested");
+        UsgsDatasetAvailability fallbackStatus = new(false, 0, "not tested");
+        SourceAvailability globalStatus = new(false, false, "not tested");
+
         GeoTileMapper? mapper = GeoTileMapper.TryCreate(route!);
         if (mapper is null)
         {
@@ -946,45 +1026,33 @@ internal static partial class Program
             {
                 try
                 {
-                    WorldTile? mapTile = processingTiles.FirstOrDefault(t => t.WorldTile is not null)?.WorldTile;
+                    TerrainTile? mapTile = processingTiles.FirstOrDefault(t => t.WorldTile is not null);
                     if (mapTile is null)
                     {
                         throw new InvalidOperationException("selection has no geographically positioned normal terrain tile");
                     }
-                    ValidateMapProjectionAlignment(mapper, mapTile);
-                    await ScanMapTileSourceAsync(mapper, cancellationToken);
+                    ValidateMapProjectionAlignment(mapper, mapTile.WorldTile!);
+                    mapSource = await ScanMapTileSourceAsync(route!.RouteDir, mapper, processingTiles, cancellationToken);
+                    hasWarnings |= mapSource.HasWarning || !mapSource.CanRun;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error: map source scan failed: {ex.Message}");
-                    blockingFailure = true;
+                    Console.WriteLine($"Map source: FAILED ({ex.Message}).");
+                    mapSource = new MapSourceAvailability(false, false, true, ex.Message);
+                    hasWarnings = true;
                 }
             }
+
             using HttpClient httpClient = new() { Timeout = TimeSpan.FromSeconds(45) };
-            if (options.CreateRouteTiles && processingTiles.FirstOrDefault(t => t.WorldTile is not null) is TerrainTile firstTile)
+            GeoSampleGrid? sourceGrid = null;
+            if (processingTiles.FirstOrDefault(t => t.WorldTile is not null) is TerrainTile firstTile)
             {
-                GeoSampleGrid grid = mapper.GetSampleGrid(firstTile.WorldTile!, 0, 0, 1, 1, 0, 0);
-                UsgsDatasetAvailability primary = await TestUsgsDatasetAsync(httpClient, grid, PrimaryDemDataset, cancellationToken);
-                UsgsDatasetAvailability intermediate = await TestUsgsDatasetAsync(httpClient, grid, IntermediateDemDataset, cancellationToken);
-                UsgsDatasetAvailability fallback = await TestUsgsDatasetAsync(httpClient, grid, FallbackDemDataset, cancellationToken);
-                bool globalOk = await TestCopernicusDatasetAsync(httpClient, grid, cancellationToken);
-                bool hasUsgsCoverage = primary.ItemCount + intermediate.ItemCount + fallback.ItemCount > 0;
-                if (!primary.ServiceAvailable || !intermediate.ServiceAvailable || !fallback.ServiceAvailable)
-                {
-                    blockingFailure = true;
-                }
-
-                if (!hasUsgsCoverage && !globalOk)
-                {
-                    Console.WriteLine("Error: representative normal tile has no available USGS product and no accessible Copernicus GLO-30 land COG.");
-                    blockingFailure = true;
-                }
+                sourceGrid = mapper.GetSampleGrid(firstTile.WorldTile!, 0, 0, 1, 1, 0, 0);
             }
-
-            if (options.CreateDistantMountains && dmCoverage.Count > 0)
+            else if (dmCoverage.Count > 0)
             {
                 LoTileCoordinate loTile = dmCoverage.OrderBy(t => t.X).ThenBy(t => t.Z).First();
-                GeoSampleGrid grid = mapper.GetAreaSampleGrid(
+                sourceGrid = mapper.GetAreaSampleGrid(
                     loTile.X + ((LoTileNormalTileSpan - 1) / 2.0),
                     loTile.Z + ((LoTileNormalTileSpan - 1) / 2.0),
                     LoTileSizeMeters,
@@ -994,18 +1062,80 @@ internal static partial class Program
                     0,
                     0,
                     0);
-                UsgsDatasetAvailability fallback = await TestUsgsDatasetAsync(httpClient, grid, FallbackDemDataset, cancellationToken);
-                bool globalOk = await TestCopernicusDatasetAsync(httpClient, grid, cancellationToken);
-                if (fallback.ItemCount == 0 && !globalOk)
-                {
-                    blockingFailure = true;
-                }
             }
+
+            if (sourceGrid is not null)
+            {
+                primaryStatus = await TestUsgsDatasetAsync(httpClient, sourceGrid, PrimaryDemDataset, cancellationToken);
+                intermediateStatus = await TestUsgsDatasetAsync(httpClient, sourceGrid, IntermediateDemDataset, cancellationToken);
+                fallbackStatus = await TestUsgsDatasetAsync(httpClient, sourceGrid, FallbackDemDataset, cancellationToken);
+                globalStatus = await TestCopernicusDatasetAsync(httpClient, sourceGrid, cancellationToken);
+                demSources = new DemSourcePolicy(
+                    primaryStatus.ServiceAvailable && primaryStatus.ItemCount > 0,
+                    intermediateStatus.ServiceAvailable && intermediateStatus.ItemCount > 0,
+                    fallbackStatus.ServiceAvailable && fallbackStatus.ItemCount > 0,
+                    globalStatus.ServiceAvailable && globalStatus.CoverageAvailable);
+                hasWarnings |= !demSources.UsePrimary || !demSources.UseIntermediate ||
+                    !demSources.UseFallback || !demSources.UseGlobal;
+            }
+
+            routeCanRun = options.CreateRouteTiles && demSources.HasAny;
+            distantMountainCanRun = options.CreateDistantMountains && (demSources.UseFallback || demSources.UseGlobal);
         }
 
-        Console.WriteLine();
-        Console.WriteLine(blockingFailure ? "Scan result: FAILED" : "Scan result: PASSED");
-        return new ScanSummary(!blockingFailure, options.CreateRouteTiles ? processingTiles.Count : 0, options.CreateDistantMountains ? dmCoverage.Count : 0, unreadableRouteTiles, unreadableDmTiles);
+        bool anySelectedStageCanRun = routeCanRun || distantMountainCanRun || (options.CreateMapTiles && mapSource.CanRun);
+        if (!anySelectedStageCanRun)
+        {
+            Console.WriteLine("Error: none of the selected production stages has an available source path.");
+            blockingFailure = true;
+        }
+
+        hasWarnings |= (options.CreateRouteTiles && !routeCanRun) ||
+            (options.CreateDistantMountains && !distantMountainCanRun) ||
+            (options.CreateMapTiles && !mapSource.CanRun);
+
+        Console.WriteLine("\n=========================================");
+        Console.WriteLine(" SCAN DATA SOURCE STATUS ");
+        Console.WriteLine("=========================================");
+        PrintDataSourceStatus("Terrain DEM - 1m", "USGS - The National Map", demSources.UsePrimary);
+        Console.WriteLine($"Details: {FormatUsgsScanDetail(primaryStatus, demSources.UsePrimary)}");
+        PrintDataSourceStatus("Terrain DEM - approximately 5m", "USGS - The National Map", demSources.UseIntermediate);
+        Console.WriteLine($"Details: {FormatUsgsScanDetail(intermediateStatus, demSources.UseIntermediate)}");
+        PrintDataSourceStatus("Terrain DEM - 10m", "USGS - The National Map", demSources.UseFallback);
+        Console.WriteLine($"Details: {FormatUsgsScanDetail(fallbackStatus, demSources.UseFallback)}");
+        PrintDataSourceStatus("Global terrain DEM - 30m", "Copernicus GLO-30", demSources.UseGlobal);
+        Console.WriteLine($"Details: {FormatGlobalScanDetail(globalStatus, demSources.UseGlobal)}");
+        if (options.CreateMapTiles)
+        {
+            PrintDataSourceStatus(
+                "OpenStreetMap regional extract",
+                mapSource.CacheOnly ? "Local Geofabrik PBF cache" : "Geofabrik",
+                mapSource.CanRun);
+            Console.WriteLine($"Details: {mapSource.Detail}");
+        }
+
+        Console.WriteLine("\nRun plan:");
+        Console.WriteLine($"  Normal terrain: {StagePlanText(options.CreateRouteTiles, routeCanRun)}");
+        Console.WriteLine($"  Distant Mountains: {StagePlanText(options.CreateDistantMountains, distantMountainCanRun)}");
+        Console.WriteLine($"  Map overlays: {StagePlanText(options.CreateMapTiles, mapSource.CanRun)}{(mapSource.CacheOnly ? " (cached PBF; no Geofabrik polling)" : "")}");
+
+        string result = blockingFailure ? "FAILED" : hasWarnings ? "PASSED WITH WARNINGS" : "PASSED";
+        Console.WriteLine($"\nScan result: {result}");
+        return new ScanSummary(
+            !blockingFailure,
+            options.CreateRouteTiles ? processingTiles.Count : 0,
+            options.CreateDistantMountains ? dmCoverage.Count : 0,
+            unreadableRouteTiles,
+            unreadableDmTiles,
+            hasWarnings,
+            demSources,
+            primaryStatus.ServiceAvailable,
+            intermediateStatus.ServiceAvailable,
+            fallbackStatus.ServiceAvailable,
+            routeCanRun,
+            distantMountainCanRun,
+            options.CreateMapTiles && mapSource.CanRun,
+            mapSource.CacheOnly);
     }
 
     // Offset test tool. This does not contact USGS; it resamples existing _y.raw
@@ -1607,21 +1737,65 @@ internal static partial class Program
             if (!response.IsSuccessStatusCode)
             {
                 Console.WriteLine($"USGS {GetDemSourceDisplayName(datasetName)}: FAILED ({(int)response.StatusCode} {response.ReasonPhrase}).");
-                return new UsgsDatasetAvailability(false, 0);
+                return new UsgsDatasetAvailability(false, 0, $"{(int)response.StatusCode} {response.ReasonPhrase}");
             }
 
             string json = await response.Content.ReadAsStringAsync(cancellationToken);
             using JsonDocument doc = ParseUsgsProductJson(json);
             int itemCount = doc.RootElement.TryGetProperty("items", out JsonElement items) ? items.GetArrayLength() : 0;
             Console.WriteLine($"USGS {GetDemSourceDisplayName(datasetName)}: active, {itemCount:N0} product(s) for representative bbox.");
-            return new UsgsDatasetAvailability(true, itemCount);
+            return new UsgsDatasetAvailability(true, itemCount, $"active, {itemCount:N0} representative product(s)");
         }
         catch (Exception ex) when (ex is TaskCanceledException or HttpRequestException or JsonException or InvalidOperationException)
         {
             Console.WriteLine($"USGS {GetDemSourceDisplayName(datasetName)}: FAILED ({ex.Message}).");
-            return new UsgsDatasetAvailability(false, 0);
+            return new UsgsDatasetAvailability(false, 0, ex.Message);
         }
     }
+
+    private static void PrintDataSourceStatus(string data, string source, bool passed)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"Data:   {data}");
+        Console.WriteLine($"Source: {source}");
+        Console.WriteLine($"Status: {(passed ? "PASSED" : "FAILED")}");
+    }
+
+    private static string FormatUsgsScanDetail(UsgsDatasetAvailability status, bool enabledForRun)
+    {
+        if (!status.ServiceAvailable)
+        {
+            return $"SERVICE UNAVAILABLE; disabled for Run. {status.Detail}";
+        }
+
+        return status.ItemCount > 0
+            ? $"SERVICE ONLINE / ROUTE COVERAGE AVAILABLE; {status.ItemCount:N0} representative product(s); {(enabledForRun ? "enabled for Run" : "not used")}."
+            : "SERVICE ONLINE / NO ROUTE COVERAGE; disabled for Run and will not be polled tile by tile.";
+    }
+
+    private static string FormatUsgsRunDetail(bool enabledForRun, bool serviceAvailable) =>
+        enabledForRun
+            ? serviceAvailable
+                ? "SERVICE ONLINE / ROUTE COVERAGE AVAILABLE; enabled for Run."
+                : "Enabled by Scan Override or CLI; service availability was not preflighted."
+            : serviceAvailable
+                ? "SERVICE ONLINE / NO ROUTE COVERAGE; disabled for Run."
+                : "SERVICE UNAVAILABLE; disabled for Run.";
+
+    private static string FormatGlobalScanDetail(SourceAvailability status, bool enabledForRun)
+    {
+        if (!status.ServiceAvailable)
+        {
+            return $"Unavailable and disabled for Run. {status.Detail}";
+        }
+
+        return status.CoverageAvailable
+            ? $"{(enabledForRun ? "Enabled for Run" : "Not used")}. {status.Detail}."
+            : $"No representative land coverage; not used. {status.Detail}.";
+    }
+
+    private static string StagePlanText(bool selected, bool canRun) =>
+        !selected ? "NOT SELECTED" : canRun ? "ENABLED" : "SKIPPED - required source unavailable";
 
     private static void PrintProgressCheckpoint(int processed, int total, int generated, int skipped, int failed)
     {

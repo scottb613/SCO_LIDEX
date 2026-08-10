@@ -23,6 +23,7 @@ internal static partial class Program
         string outputDir,
         double sourceBiasEastMeters,
         double sourceBiasNorthMeters,
+        DemSourcePolicy sourcePolicy,
         CancellationToken cancellationToken)
     {
         List<TerrainTile> tiles = route.TerrainTiles
@@ -71,7 +72,7 @@ internal static partial class Program
                     ExperimentalPostSpacingMeters,
                     sourceBiasEastMeters: sourceBiasEastMeters,
                     sourceBiasNorthMeters: sourceBiasNorthMeters);
-                TerrainGenerationResult result = await StreamOrtsGridForSampleGridAsync(httpClient, sampleGrid);
+                TerrainGenerationResult result = await StreamOrtsGridForSampleGridAsync(httpClient, sampleGrid, sourcePolicy);
                 Console.WriteLine(result.GlobalSamplesUsed > 0
                     ? "STATUS: TILES - GLOBAL - LOW RES"
                     : "STATUS: TILES - US - HIGH RES");

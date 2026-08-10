@@ -76,6 +76,11 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 - Supports the same global fallback for normal route terrain and TSRE-style Distant Mountain terrain.
 - Identifies the source as a low-resolution digital surface model that may include vegetation, buildings, and infrastructure.
 - Adds separate `30m (global)` status counters, an amber `GLOBAL - LOW RES MODE` indicator, representative-source Scan validation, and Copernicus data-read totals.
+- Reports USGS 1m, 5m~, 10m, Copernicus, and Geofabrik status separately at the end of Scan; viable fallbacks enable Run with warnings while failed or uncovered sources are excluded from that Run.
+- Allows cached Geofabrik index/PBF data to keep map generation available during an outage; otherwise only maps are skipped while viable terrain/DM work can continue.
+- Stores each downloaded Geofabrik PBF with its route under `OpenStreetMap\geofabrik`, writes a portable `OpenStreetMap\osm-cache.json` manifest, and migrates a matching legacy AppData PBF without redownloading it.
+- Keeps the small shared Geofabrik index and a cross-route cache registry under `%LocalAppData%\SCOLIDEX`, allowing route-local OSM data to be rediscovered after later launches.
+- Replaces the all-or-nothing exit purge with an unchecked, per-cache list covering regional PBFs and incomplete downloads. The small shared Geofabrik index and generated TSRE map PNGs are never offered for deletion.
 - Grows the application window to add the new row without reducing the running-log area.
 - Isolates Copernicus naming, discovery, validation, and COG reads in `Program.Copernicus.cs`.
 - Enables **Create Map Tiles** using anonymous Geofabrik regional OpenStreetMap PBF extracts rather than the public OSM editing API.
@@ -100,7 +105,7 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 - Internet access while requesting elevation or Geofabrik map data.
 - USGS elevation coverage is United States focused.
 - Large routes can require substantial processing time and disk space.
-- Map overlays are compressed 4096×4096 PNG files in the route's `terrain_maps` cache. On exit, SCO LIDEX reports the exact regional PBF cache size and offers **Keep Cache**, **Purge Cache**, or **Cancel Exit**.
+- Map overlays are compressed 4096×4096 PNG files in the route's `terrain_maps` folder and are never deleted by SCO LIDEX cache cleanup. Regional PBF data is kept under the route's `OpenStreetMap` folder so it can remain with the route and support future tools. On exit, SCO LIDEX lists known OSM data caches and allows only individually checked caches to be purged.
 - Clean Tile Wipe and post-processing terrain shifts modify route files; always work from a backup.
 - KML polygon filling is basic and should be considered experimental.
 - SCO LIDEX reads `TsreGeoProjection` when present but does not create or modify that route setting.

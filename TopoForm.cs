@@ -103,6 +103,7 @@ internal sealed partial class TopoForm : Form
     private CancellationTokenSource? scanCancellation;
     private bool scanPassed;
     private bool scanLocked;
+    private Program.ScanSummary? lastScanSummary;
     private TextWriter? previousOut;
     private TextWriter? previousError;
     private StreamWriter? logFileWriter;
@@ -1153,6 +1154,7 @@ internal sealed partial class TopoForm : Form
         ResetStatus();
         SetOperationMessage("SCANNING");
         scanPassed = false;
+        lastScanSummary = null;
         scanLocked = true;
         SetScanning(true);
         scanCancellation = new CancellationTokenSource();
@@ -1184,10 +1186,15 @@ internal sealed partial class TopoForm : Form
             dmStatus.Total = summary.DistantMountainTotal;
             dmStatus.Failures = summary.UnreadableDistantMountainTiles;
             UpdateStatusDisplay();
+            lastScanSummary = summary;
             scanPassed = summary.CanRun;
-            SetOperationMessage(scanPassed ? "SCAN COMPLETE" : "SCAN FAILED");
+            SetOperationMessage(scanPassed
+                ? summary.HasWarnings ? "SCAN COMPLETE - WARNINGS" : "SCAN COMPLETE"
+                : "SCAN FAILED");
             AppendLog(scanPassed
-                ? $"{Environment.NewLine}Scan passed. Run is enabled. Use Abort to unlock and change settings.{Environment.NewLine}"
+                ? summary.HasWarnings
+                    ? $"{Environment.NewLine}Scan passed with source warnings. Run is enabled for the viable stages shown in the Run plan; failed sources will not be polled.{Environment.NewLine}"
+                    : $"{Environment.NewLine}Scan passed. Run is enabled. Use Abort to unlock and change settings.{Environment.NewLine}"
                 : $"{Environment.NewLine}Scan failed. Fix blocking issues, then scan again.{Environment.NewLine}");
         }
         catch (OperationCanceledException)
@@ -1578,9 +1585,14 @@ internal sealed partial class TopoForm : Form
             args.Add("--overwrite");
         }
 
-        if (!createRouteTiles.Checked)
+        Program.ScanSummary? sourcePlan = scanOverride.Checked ? null : lastScanSummary;
+        if (!createRouteTiles.Checked || sourcePlan is { RouteCanRun: false })
         {
             args.Add("--no-route-tiles");
+            if (createRouteTiles.Checked && sourcePlan is { RouteCanRun: false })
+            {
+                args.Add("--scan-skipped-route");
+            }
         }
 
         if (cleanTileTemplate.Checked)
@@ -1611,16 +1623,34 @@ internal sealed partial class TopoForm : Form
             args.Add("--text-file-coverage");
         }
 
-        if (distantMountains.Checked)
+        if (distantMountains.Checked && sourcePlan is not { DistantMountainCanRun: false })
         {
             args.Add("--distant-mountains");
             args.Add("--lo-radius");
             args.Add(((int)loTileRadius.Value).ToString());
         }
+        else if (distantMountains.Checked && sourcePlan is { DistantMountainCanRun: false })
+        {
+            args.Add("--scan-skipped-dm");
+        }
 
-        if (createMapTiles.Checked)
+        if (createMapTiles.Checked && sourcePlan is not { MapCanRun: false })
         {
             args.Add("--map-tiles");
+            if (sourcePlan is { MapCacheOnly: true })
+            {
+                args.Add("--map-cache-only");
+            }
+        }
+        else if (createMapTiles.Checked && sourcePlan is { MapCanRun: false })
+        {
+            args.Add("--scan-skipped-maps");
+        }
+
+        if (sourcePlan is not null)
+        {
+            AddDisabledDemSourceArguments(args, sourcePlan.DemSources);
+            AddUsgsServiceStatusArguments(args, sourcePlan);
         }
 
         if (experimentalOutput.Checked)
@@ -1643,6 +1673,21 @@ internal sealed partial class TopoForm : Form
         }
 
         return args.ToArray();
+    }
+
+    private static void AddDisabledDemSourceArguments(List<string> args, Program.DemSourcePolicy sources)
+    {
+        if (!sources.UsePrimary) args.Add("--skip-usgs-1m");
+        if (!sources.UseIntermediate) args.Add("--skip-usgs-5m");
+        if (!sources.UseFallback) args.Add("--skip-usgs-10m");
+        if (!sources.UseGlobal) args.Add("--skip-copernicus");
+    }
+
+    private static void AddUsgsServiceStatusArguments(List<string> args, Program.ScanSummary summary)
+    {
+        if (summary.PrimaryServiceAvailable) args.Add("--usgs-1m-service-online");
+        if (summary.IntermediateServiceAvailable) args.Add("--usgs-5m-service-online");
+        if (summary.FallbackServiceAvailable) args.Add("--usgs-10m-service-online");
     }
 
     private void WriteRunSettingsHeader(string routePath, string operation)
@@ -1784,6 +1829,7 @@ internal sealed partial class TopoForm : Form
     private void ResetScanState()
     {
         scanPassed = false;
+        lastScanSummary = null;
         scanLocked = false;
         SetRunning(runCancellation is not null);
     }
@@ -1807,40 +1853,30 @@ internal sealed partial class TopoForm : Form
             return;
         }
 
-        string cachePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SCOLIDEX",
-            "map-data");
-        if (!Directory.Exists(cachePath))
-        {
-            return;
-        }
-
-        FileInfo[] files;
+        IReadOnlyList<Program.MapCacheEntry> caches;
         try
         {
-            files = new DirectoryInfo(cachePath)
-                .EnumerateFiles("*", SearchOption.AllDirectories)
-                .ToArray();
+            string currentRoute = NormalizeRoutePath(routePathText.Text);
+            caches = Program.GetKnownMapCaches(Directory.Exists(currentRoute) ? currentRoute : null);
         }
         catch (Exception ex)
         {
             e.Cancel = true;
             MessageBox.Show(
                 this,
-                $"SCO LIDEX could not inspect the map cache:\n\n{ex.Message}",
-                "SCO LIDEX - Map Cache",
+                $"SCO LIDEX could not inspect registered cache data:\n\n{ex.Message}",
+                "SCO LIDEX - Cache Data",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             return;
         }
 
-        if (files.Length == 0)
+        if (caches.Count == 0)
         {
             return;
         }
 
-        using MapCacheExitDialog dialog = new(cachePath, files);
+        using MapCacheExitDialog dialog = new(caches);
         DialogResult result = dialog.ShowDialog(this);
         if (result == DialogResult.Cancel)
         {
@@ -1852,15 +1888,15 @@ internal sealed partial class TopoForm : Form
         {
             try
             {
-                Directory.Delete(cachePath, recursive: true);
+                Program.PurgeMapCaches(dialog.SelectedEntries);
             }
             catch (Exception ex)
             {
                 e.Cancel = true;
                 MessageBox.Show(
                     this,
-                    $"The map cache could not be purged:\n\n{ex.Message}",
-                    "SCO LIDEX - Map Cache",
+                    $"The selected cache data could not be purged:\n\n{ex.Message}",
+                    "SCO LIDEX - Cache Data",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
                 return;
@@ -2064,10 +2100,9 @@ internal sealed partial class TopoForm : Form
         }
 
         const string statusPrefix = "STATUS: ";
-        int statusIndex = line.IndexOf(statusPrefix, StringComparison.OrdinalIgnoreCase);
-        if (statusIndex >= 0)
+        if (line.StartsWith(statusPrefix, StringComparison.Ordinal))
         {
-            SetOperationMessage(line[(statusIndex + statusPrefix.Length)..].Trim());
+            SetOperationMessage(line[statusPrefix.Length..].Trim());
         }
 
         Match dmStart = DistantMountainStartRegex().Match(line);
@@ -2243,10 +2278,10 @@ internal sealed partial class TopoForm : Form
             return;
         }
 
-        if (string.Equals(message, "SCAN COMPLETE", StringComparison.OrdinalIgnoreCase) ||
+        if (message.StartsWith("SCAN COMPLETE", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(message, "OPERATION COMPLETE", StringComparison.OrdinalIgnoreCase))
         {
-            UiSounds.PlayChirp();
+            UiSounds.PlaySuccess();
         }
         else if (message.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
                  message.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
@@ -2256,7 +2291,7 @@ internal sealed partial class TopoForm : Form
         }
         else
         {
-            UiSounds.PlayClick();
+            UiSounds.PlayProgress();
         }
     }
 

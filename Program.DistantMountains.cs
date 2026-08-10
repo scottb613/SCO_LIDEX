@@ -38,6 +38,7 @@ internal static partial class Program
         bool useKmlCoverage,
         bool useTextFileCoverage,
         bool overwriteFlag,
+        DemSourcePolicy sourcePolicy,
         CancellationToken cancellationToken)
     {
         if (useMarkerCoverage && route.Markers.Count == 0)
@@ -154,12 +155,14 @@ internal static partial class Program
                     $"lat {sampleGrid.BoundingBox.MinLat:F6}..{sampleGrid.BoundingBox.MaxLat:F6}");
 
                 List<string> failures = [];
-                DemWindowSearchResult result = await ReadDemWindowsForDatasetAsync(httpClient, sampleGrid, FallbackDemDataset, failures);
+                DemWindowSearchResult result = sourcePolicy.UseFallback
+                    ? await ReadDemWindowsForDatasetAsync(httpClient, sampleGrid, FallbackDemDataset, failures)
+                    : new DemWindowSearchResult([], ProductSearchFailed: false);
                 short[,] heights = CreateMissingHeightGrid(LoRawGridSize, LoRawGridSize);
                 int samplesUsed = MergeWindows(result.Windows, heights);
                 int missingAfterTenMeter = heights.Cast<short>().Count(h => h == RawMissingHeight);
                 int globalSamplesUsed = 0;
-                if (missingAfterTenMeter > 0)
+                if (missingAfterTenMeter > 0 && sourcePolicy.UseGlobal)
                 {
                     Console.WriteLine(
                         $"  -> {FallbackDemLabel} coverage left {missingAfterTenMeter:N0} missing DM samples; " +

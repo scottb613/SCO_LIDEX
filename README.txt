@@ -30,8 +30,21 @@ v1.200 - What's New
   buildings, and infrastructure.
 - Adds a 30m (global) status row, low-resolution indicator, Scan validation,
   and separate Copernicus data-read logging without shrinking the run log.
+- Reports USGS 1m, 5m~, 10m, Copernicus, and Geofabrik status separately at the
+  end of Scan. Viable fallbacks enable Run with warnings; failed or uncovered
+  sources are not polled during that Run.
+- Uses cached Geofabrik index/PBF data for maps during an outage when available;
+  otherwise only maps are skipped while viable terrain/DM work continues.
 - Enables Create Map Tiles from anonymous Geofabrik OpenStreetMap regional PBF
-  extracts, with resumable LocalAppData caching and no public OSM API bulk use.
+  extracts, with resumable route-local caching and no public OSM API bulk use.
+- Stores the regional PBF under OpenStreetMap\geofabrik in the route and writes
+  an OpenStreetMap\osm-cache.json manifest for future discovery and reuse.
+- Migrates a matching legacy AppData PBF into the route without redownloading.
+- Keeps the small Geofabrik index and cross-route cache registry under
+  %LocalAppData%\SCOLIDEX.
+- Lists regional PBFs and partial downloads separately on exit. Purge boxes are
+  unchecked by default. The small shared Geofabrik index and generated
+  terrain_maps PNG files are never offered for deletion.
 - Creates a 4096x4096 TSRE F3 overlay PNG per selected normal tile in
   terrain_maps using TSRE's X*10000+Y naming convention.
 - Overwrites a matching cached PNG directly while leaving terrain .t materials,
