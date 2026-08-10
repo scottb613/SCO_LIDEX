@@ -44,8 +44,8 @@ Repository Layout and File Placement
   `generated-lo_tiles`.
 - Product assets belong under `content` or their existing dedicated folder.
 - Route-local OSM extracts belong under
-  `<Route>\OpenStreetMap\geofabrik`; their authoritative metadata belongs in
-  `<Route>\OpenStreetMap\osm-cache.json`.
+  `<Route>\osm_data\geofabrik`; their authoritative metadata belongs in
+  `<Route>\osm_data\osm-cache.json`.
 - The small shared Geofabrik index and cross-route cache registry belong under
   `%LocalAppData%\SCOLIDEX`. Do not move route settings or history into a
   purgeable cache group.
@@ -87,7 +87,7 @@ AI House Rules
 - Do not poll a source during Run when Scan has disabled it.
 - Cache purge controls default to unchecked and may delete only exact,
   validated OSM files in a registered AppData cache root or route
-  OpenStreetMap cache.
+  `osm_data` cache.
 - Generated terrain_maps PNG files are route output. LIDEX must never list,
   purge, or remove them as cache data.
 - Always clean temporary harnesses, staging folders, failed package output,

@@ -64,9 +64,9 @@ Create Map Tiles:
   Run asks for confirmation before downloading. The anonymous Geofabrik PBF is
   resumable and stored with the route:
 
-  <Route>\OpenStreetMap\geofabrik\<region-id>.osm.pbf
+  <Route>\osm_data\geofabrik\<region-id>.osm.pbf
 
-  SCO LIDEX also writes <Route>\OpenStreetMap\osm-cache.json. The manifest
+  SCO LIDEX also writes <Route>\osm_data\osm-cache.json. The manifest
   identifies the provider, region, URL, source date, expected size, geographic
   bounds, relative PBF path, and creating version so LIDEX or future route tools
   can validate and reuse the extract.

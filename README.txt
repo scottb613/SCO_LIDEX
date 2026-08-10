@@ -37,8 +37,8 @@ v1.200 - What's New
   otherwise only maps are skipped while viable terrain/DM work continues.
 - Enables Create Map Tiles from anonymous Geofabrik OpenStreetMap regional PBF
   extracts, with resumable route-local caching and no public OSM API bulk use.
-- Stores the regional PBF under OpenStreetMap\geofabrik in the route and writes
-  an OpenStreetMap\osm-cache.json manifest for future discovery and reuse.
+- Stores the regional PBF under osm_data\geofabrik in the route and writes an
+  osm_data\osm-cache.json manifest for discovery and reuse.
 - Migrates a matching legacy AppData PBF into the route without redownloading.
 - Keeps the small Geofabrik index and cross-route cache registry under
   %LocalAppData%\SCOLIDEX.

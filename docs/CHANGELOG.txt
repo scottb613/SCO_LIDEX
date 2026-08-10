@@ -17,7 +17,7 @@ v1.200
   informational and cannot suppress the final operation-complete state.
 - Added explicit terrain, Distant Mountain, and OSM/map completion statuses.
 - Moved downloaded Geofabrik PBF extracts into each route's
-  OpenStreetMap\geofabrik folder and added a portable osm-cache.json manifest.
+  osm_data\geofabrik folder and added a portable osm-cache.json manifest.
 - Added verified migration of matching legacy AppData PBF and partial-download
   data so existing large downloads are reused rather than fetched again.
 - Added an AppData cache-registry-v1.json index for discovering route-local

@@ -1,5 +1,5 @@
 // Copyright (C) Scott Brunner, Beast of Burden
-// Route-local OpenStreetMap cache manifests, AppData cache registry, and safe
+// Route-local OSM cache manifests, AppData cache registry, and safe
 // cache discovery/purge support.
 // SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
 
@@ -11,7 +11,7 @@ namespace ORterr;
 internal static partial class Program
 {
     private const int OsmCacheSchemaVersion = 1;
-    private const string RouteOsmDirectoryName = "OpenStreetMap";
+    private const string RouteOsmDirectoryName = "osm_data";
     private const string RouteOsmProviderDirectoryName = "geofabrik";
     private const string RouteOsmManifestFileName = "osm-cache.json";
     private const string MapCacheRegistryFileName = "cache-registry-v1.json";
@@ -163,7 +163,7 @@ internal static partial class Program
         string fullPbfPath = Path.GetFullPath(pbfPath);
         if (!IsPathInside(fullPbfPath, osmRoot))
         {
-            throw new InvalidOperationException("route OSM manifest cannot reference a file outside the route OpenStreetMap cache");
+            throw new InvalidOperationException("route OSM manifest cannot reference a file outside the route osm_data cache");
         }
 
         Directory.CreateDirectory(osmRoot);
