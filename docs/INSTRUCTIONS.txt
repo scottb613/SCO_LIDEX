@@ -322,6 +322,12 @@ The message panel between Exit and Contact reports the active production stage:
 - OSM - MAKING MAPS
 - OPERATION COMPLETE
 
+Every message remains animated with cycling bullets while Scan or Run is still
+processing. Intermediate completion messages such as TILES - COMPLETE,
+DISTANT MOUNTAINS - COMPLETE, and OSM / MAPS - COMPLETE remain animated because
+later work or final cleanup is still active. Only the overall SCAN COMPLETE or
+OPERATION COMPLETE outcome, failures, errors, aborts, and READY remain fixed.
+
 Interface sounds follow the same production states:
 - SCOpress plays for application button presses.
 - SCOtic plays for checkbox and radio-button selections.

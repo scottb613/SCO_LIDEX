@@ -121,9 +121,7 @@ Look under [b]Releases[/b] and download [b]SCOLIDEX-v1.200-win-x64.zip[/b]:
 
 [url=https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.200]https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.200[/url]
 
-Thanks to everyone who tested the earlier U.S.-only releases and asked the obvious question - when will the rest of the world get terrain?
-
-Well - here we are.
+Thanks to everyone who tested the earlier U.S.-only releases.
 
 Regards,
 Scott

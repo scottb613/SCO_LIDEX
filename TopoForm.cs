@@ -2315,7 +2315,8 @@ internal sealed partial class TopoForm : Form
 
     private static bool IsFinalOperationMessage(string message)
     {
-        return message.Contains("COMPLETE", StringComparison.OrdinalIgnoreCase) ||
+        return message.StartsWith("SCAN COMPLETE", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(message, "OPERATION COMPLETE", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("ABORT", StringComparison.OrdinalIgnoreCase) ||

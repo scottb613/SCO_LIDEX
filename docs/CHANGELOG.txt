@@ -37,7 +37,9 @@ v1.200
   only the map stage when no valid cache exists.
 - Added immediate SCANNING status and a one-second working indicator that cycles
   active statuses through zero, one, two, and three real bullets on each side.
-  Completion, failure, error, abort, and ready states remain fixed.
+  Intermediate terrain, Distant Mountain, and map completion stages remain
+  animated while Run continues. Only overall Scan/Run completion, failure,
+  error, abort, and ready states remain fixed.
 - Create Map Tiles writes directly to TSRE's F3
   `terrain_maps/<X*10000+Y>.png` overlay cache. Matching PNGs are overwritten;
   no map ACE is created and terrain `.t` materials/UVs remain unchanged.
