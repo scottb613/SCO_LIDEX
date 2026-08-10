@@ -750,11 +750,11 @@ internal static partial class Program
             if (dmFailures > 0)
             {
                 Console.WriteLine("Distant Mountain stage contains failures. Map generation was not started; fix the error or run Append first.");
-                Console.WriteLine("STATUS: FAILURE - DISTANT MOUNTAINS");
+                Console.WriteLine("STATUS: FAILURE - DM");
                 return;
             }
 
-            Console.WriteLine("STATUS: DISTANT MOUNTAINS - COMPLETE");
+            Console.WriteLine("STATUS: DM - COMPLETE");
         }
 
         if (createMapTiles && !inspectOnly)

@@ -316,7 +316,7 @@ The message panel between Exit and Contact reports the active production stage:
 - SCAN COMPLETE
 - TILES - US - HIGH RES
 - TILES - GLOBAL - LOW RES
-- TILES - DISTANT MOUNTAINS
+- DM - PROCESSING
 - OSM - DOWNLOAD
 - OSM - PROCESSING
 - OSM - MAKING MAPS
@@ -324,7 +324,7 @@ The message panel between Exit and Contact reports the active production stage:
 
 Every message remains animated with cycling bullets while Scan or Run is still
 processing. Intermediate completion messages such as TILES - COMPLETE,
-DISTANT MOUNTAINS - COMPLETE, and OSM / MAPS - COMPLETE remain animated because
+DM - COMPLETE, and OSM / MAPS - COMPLETE remain animated because
 later work or final cleanup is still active. Only the overall SCAN COMPLETE or
 OPERATION COMPLETE outcome, failures, errors, aborts, and READY remain fixed.
 

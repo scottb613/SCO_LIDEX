@@ -101,7 +101,7 @@ internal static partial class Program
                         ? "text file"
             : $"{route.TerrainTiles.Count:N0} route tiles";
         Console.WriteLine($"\nDistant Mountains: {coverageDescription}, radius {loTileRadius:N0}, {total:N0} lo_tiles.");
-        Console.WriteLine("STATUS: TILES - DISTANT MOUNTAINS");
+        Console.WriteLine("STATUS: DM - PROCESSING");
         if (sampleOffsetX != 0 || sampleOffsetY != 0)
         {
             Console.WriteLine($"Distant Mountains: applying sample offset X={sampleOffsetX:F3}, Y={sampleOffsetY:F3} grid sample(s).");

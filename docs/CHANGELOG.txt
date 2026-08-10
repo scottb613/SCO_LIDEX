@@ -40,6 +40,8 @@ v1.200
   Intermediate terrain, Distant Mountain, and map completion stages remain
   animated while Run continues. Only overall Scan/Run completion, failure,
   error, abort, and ready states remain fixed.
+- Shortened Distant Mountain message-panel stages to DM - PROCESSING,
+  DM - COMPLETE, and FAILURE - DM so animated bullets fit the panel cleanly.
 - Create Map Tiles writes directly to TSRE's F3
   `terrain_maps/<X*10000+Y>.png` overlay cache. Matching PNGs are overwritten;
   no map ACE is created and terrain `.t` materials/UVs remain unchanged.
