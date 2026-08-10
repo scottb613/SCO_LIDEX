@@ -25,6 +25,17 @@ https://gdal.org/
 The distributed runtime includes GDAL license information in:
 SCOLIDEX-win-x64\LICENSE.TXT
 
+OpenStreetMap and Geofabrik
+---------------------------
+Create Map Tiles uses OpenStreetMap data supplied as regional extracts by
+Geofabrik GmbH. OpenStreetMap data is copyright OpenStreetMap contributors and
+is available under the Open Database License (ODbL).
+https://www.openstreetmap.org/copyright
+https://download.geofabrik.de/
+
+SCO LIDEX uses Geofabrik downloads for bulk access and does not bulk-download
+from the public OpenStreetMap editing API or standard map-tile servers.
+
 Open Rails / MSTS / TSRE route formats
 --------------------------------------
 SCO LIDEX writes files compatible with Open Rails / MSTS route terrain and
@@ -35,3 +46,18 @@ USGS elevation services
 -----------------------
 SCO LIDEX requests elevation products from USGS services. Users are responsible
 for complying with any applicable USGS service terms and availability limits.
+
+Copernicus DEM GLO-30 Public
+----------------------------
+SCO LIDEX can read Copernicus DEM GLO-30 Public Cloud Optimized GeoTIFFs from
+the Registry of Open Data on AWS without an account or API key. Copernicus DEM
+is a Digital Surface Model representing the Earth's surface, including
+buildings, infrastructure, and vegetation.
+
+Copernicus Digital Elevation Model (DEM) was accessed from:
+https://registry.opendata.aws/copernicus-dem/
+
+Terrain produced by SCO LIDEX adapts the source data. Required source notice:
+Produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence
+and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and
+ESA; all rights reserved.

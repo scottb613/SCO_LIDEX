@@ -6,14 +6,23 @@ SCO LIDEX is a Windows-only .NET WinForms application.
 Requirements:
 - Windows 10 or newer.
 - .NET SDK matching the target framework in SCOLIDEX.csproj.
-- Internet access for normal terrain runs, because elevation data is requested
-  from USGS services at runtime.
+- Internet access for terrain runs, because elevation data is requested from
+  USGS services and the public Copernicus DEM GLO-30 AWS bucket at runtime.
 
 Build:
   dotnet build SCOLIDEX.csproj -c Release
 
+Read-only Copernicus source probe:
+  dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --copernicus-probe --latitude 51.5007 --longitude -0.1246
+
 Publish self-contained Win x64:
   dotnet publish SCOLIDEX.csproj -c Release -r win-x64 --self-contained true -o dist\SCOLIDEX-win-x64
+
+Experimental 4m source status:
+  Program.Experimental4m.cs and its supporting 512-grid/seam mechanisms remain
+  compiled, but Program.Experimental4mExportEnabled is false. Leave this switch
+  false for normal builds. Re-enabling it requires a deliberate Open Rails test
+  build and renewed format validation.
 
 Distribution layout:
   AddShortcutDesktop.cmd
@@ -21,6 +30,9 @@ Distribution layout:
   README.txt
   SCOLIDEX-win-x64\
   docs\
+
+All WAV files under content\ are copied automatically to build and publish
+output. Keep every supplied sound there, including sounds reserved for later.
 
 The docs folder is tracked in source and must be copied into every packaged
 distribution. Keep the root README files and docs copies synchronized before
