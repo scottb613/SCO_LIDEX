@@ -15,3 +15,10 @@ Corel Auto-Preserve/
 *.pspimage
 SCOLIDEX-startup-error.txt
 SCOLIDEX.log
+
+# Local development/reference trees and generated working data.
+.openrails-src/
+.tsre5-src/
+SCO_LIDEX/
+demex_tile/
+textures/

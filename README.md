@@ -1,12 +1,14 @@
 # SCO LIDEX Terrain Builder
 
-SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route developers. It discovers route coverage, obtains USGS elevation data, builds normal terrain and optional TSRE-style distant mountains, validates the work, and writes terrain back into an existing route.
+SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route developers. It discovers route coverage, obtains USGS or global Copernicus elevation data, builds normal terrain and optional TSRE-style distant mountains, validates the work, and writes terrain back into an existing route.
 
-## Release highlights
+> **Release status:** `main` contains v1.200. The previous published release is [v1.100](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.100).
 
-### v1.000 — Complete feature set
+## Release Highlights
 
-#### Terrain generation and source data
+### v1.000 — Complete Feature Set
+
+#### Terrain Generation and Source Data
 
 - Builds normal Open Rails/MSTS terrain from USGS 1-meter 3DEP elevation data.
 - Falls back through USGS Original Product Resolution data, displayed as **5m~**, and USGS/NED 1/3 arc-second data, displayed as **10m**, when finer coverage is unavailable.
@@ -14,14 +16,14 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 - Uses GDAL windowed raster reads so only the needed parts of source products are read instead of downloading complete DEM files.
 - Merges generated terrain in a bounded rolling window to support large routes without retaining the entire route in memory.
 
-#### Coverage and tile selection
+#### Coverage and Tile Selection
 
 - Uses existing route terrain tiles as coverage.
 - Accepts exact tile names from `ROUTE\SCOLIDEXTiles.txt`.
 - Builds coverage from the route marker file, KML coordinates, or track database references.
 - Provides configurable normal-terrain and Distant Mountain coverage radii.
 
-#### Normal and Distant Mountain terrain
+#### Normal and Distant Mountain Terrain
 
 - Creates or updates normal route terrain in **Append** or **Overwrite** mode.
 - Creates TSRE-style Distant Mountain `lo_tiles` from 10-meter elevation data.
@@ -30,14 +32,14 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 - Includes clean normal-terrain and `lo_tile` templates for first-time creation and recovery from unsupported or damaged terrain files.
 - Provides the explicitly destructive **Clean Tile Wipe** option for rebuilding a tile from a clean template.
 
-#### Projection, placement, and calibration
+#### Projection, Placement, and Calibration
 
 - Supports the standard MSTS/Open Rails interrupted Goode homolosine world-tile projection.
 - Detects and honors route-specific `TsreGeoProjection` entries for DEM sampling, coverage bounds, markers, KML, and Distant Mountains.
 - Provides meter-based north/south and east/west **Advanced Geo Bias** controls for route-specific calibration during DEM generation.
 - Includes **Commit/Post Processing** for quickly testing offsets by resampling existing normal or TSRE-style Distant Mountain height grids without another USGS download.
 
-#### Safety, validation, and recovery
+#### Safety, Validation, and Recovery
 
 - Performs a read-only **Scan** before Run and validates route paths, selected tiles, raw-grid readability, decoded coordinates, templates, and a representative USGS service request.
 - Provides **Scan Override** for deliberate advanced or known-good workflows.
@@ -46,7 +48,7 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 - Provides live totals for processed, skipped, failed, 1m, 5m~, and 10m work.
 - Supports **Abort** and stops before the next tile or write step.
 
-#### Application and diagnostics
+#### Application and Diagnostics
 
 - Provides a Windows WinForms interface with a formatted, read-only Help viewer.
 - Prevents multiple GUI instances from running simultaneously.
@@ -54,7 +56,7 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 - Writes `SCOLIDEX-startup-error.txt` to the Desktop if startup fails before the GUI opens.
 - Ships as a self-contained Windows x64 distribution with GDAL, clean terrain templates, documentation, third-party notices, and a desktop shortcut helper.
 
-### v1.100 — Additional work
+### v1.100 — Additional Work
 
 - Corrects standard-projection terrain placement by **16 meters east and 16 meters south** to match the TSRE map-coordinate convention confirmed across multiple test routes.
 - Applies the correction at geographic sampling time to both normal terrain and Distant Mountain generation, preserving consistent tile transitions.
@@ -64,20 +66,41 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 - Aligns the Windows executable file, assembly, and product metadata with version 1.100.
 - Restores a tracked and distributed `docs` folder and adds this Markdown README for GitHub and release-page presentation.
 
+### v1.200 — What's New
+
+- Adds non-overlapping interface sounds for application buttons, checkbox/radio selections, normal status-stage changes, successful Scan/Run completion, and failure/error/abort indications; all supplied WAV assets remain packaged.
+- Retains the isolated **Experimental – 4m** implementation for complete KML terrain footprints, 512×512 grids, seam merging and optional maps, but deactivates its export switch; the GUI remains fixed to **Normal – 8m**.
+- Restores the **Route Path Browse** button and adds a clearly labeled **Recent** menu for the five most recently used valid routes, saved in `%LocalAppData%\SCOLIDEX\route-history.json`.
+- Adds key-free global elevation fallback using Copernicus DEM GLO-30 Public Cloud Optimized GeoTIFFs on AWS Open Data.
+- Uses the established USGS `1m` → `5m~` → `10m` sequence first, then fills only unresolved posts from `30m (global)` data.
+- Supports the same global fallback for normal route terrain and TSRE-style Distant Mountain terrain.
+- Identifies the source as a low-resolution digital surface model that may include vegetation, buildings, and infrastructure.
+- Adds separate `30m (global)` status counters, an amber `GLOBAL - LOW RES MODE` indicator, representative-source Scan validation, and Copernicus data-read totals.
+- Grows the application window to add the new row without reducing the running-log area.
+- Isolates Copernicus naming, discovery, validation, and COG reads in `Program.Copernicus.cs`.
+- Enables **Create Map Tiles** using anonymous Geofabrik regional OpenStreetMap PBF extracts rather than the public OSM editing API.
+- Renders one 4096×4096 map overlay per selected 2048-meter normal terrain tile and writes it directly to TSRE's F3 `terrain_maps/<X*10000+Y>.png` cache.
+- Overwrites a matching cached PNG without creating a map ACE or changing terrain materials, 16×16 patch UVs, TERRTEX files, or Distant Mountain tiles.
+- Projects every OSM vertex through the same corrected tile-local coordinate path used by terrain sampling; the Austria acceptance route reports zero pixel error at tile corners and center.
+- Loads selected-route PBF geometry once, retains it for the complete run, and renders two 4096 bitmaps concurrently.
+- Uses bundled GDAL and TSRE's F3 PNG naming/projection behavior; no API key, external map service, route-editor executable, or legacy MSTS runtime is required.
+- Ports TSRE's OSM drawing style: warm paper background, pale land-use fills, outlined buildings, feature ordering, railway treatment, and cased motorway/primary/secondary/tertiary road colors and widths.
+
 ## Installation
 
-1. Download `SCOLIDEX-v1.100-win-x64.zip` from the [v1.100 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.100).
+1. Download `SCOLIDEX-v1.200-win-x64.zip` from the [v1.200 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.200).
 2. Extract the complete archive to a writable folder.
 3. Run `SCOLIDEX-win-x64\SCOLIDEX.exe`.
 4. Optionally run `AddShortcutDesktop.cmd` from the extracted top-level folder.
 5. Back up a route before using Run, Overwrite, Clean Tile Wipe, or Commit.
 
-## Requirements and limitations
+## Requirements and Limitations
 
 - Windows 10 or newer, 64-bit.
-- Internet access while requesting elevation data.
+- Internet access while requesting elevation or Geofabrik map data.
 - USGS elevation coverage is United States focused.
 - Large routes can require substantial processing time and disk space.
+- Map overlays are compressed 4096×4096 PNG files in the route's `terrain_maps` cache. On exit, SCO LIDEX reports the exact regional PBF cache size and offers **Keep Cache**, **Purge Cache**, or **Cancel Exit**.
 - Clean Tile Wipe and post-processing terrain shifts modify route files; always work from a backup.
 - KML polygon filling is basic and should be considered experimental.
 - SCO LIDEX reads `TsreGeoProjection` when present but does not create or modify that route setting.

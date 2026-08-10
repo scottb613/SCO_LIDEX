@@ -12,6 +12,7 @@ using System.IO;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -39,14 +40,22 @@ internal sealed partial class TopoForm : Form
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "SCOLIDEX");
     private static readonly string LastRoutePathFile = Path.Combine(SettingsDirectory, "last-route.txt");
+    private static readonly string RouteHistoryFile = Path.Combine(SettingsDirectory, "route-history.json");
+    private const int MaximumRouteHistoryEntries = 5;
 
     private readonly TextBox routePathText = new();
+    private readonly Button routeHistoryButton = new();
+    private readonly Button browseRouteButton = new();
+    private readonly ContextMenuStrip routeHistoryMenu = new();
     private readonly RadioButton appendMode = new();
     private readonly RadioButton overwriteMode = new();
     private readonly CheckBox createRouteTiles = new();
     private readonly CheckBox distantMountains = new();
+    private readonly CheckBox createMapTiles = new();
     private readonly CheckBox cleanTileTemplate = new();
     private readonly CheckBox scanOverride = new();
+    private readonly RadioButton normalOutput = new();
+    private readonly RadioButton experimentalOutput = new();
     private readonly RadioButton existingTilesCoverage = new();
     private readonly RadioButton markerCoverage = new();
     private readonly RadioButton kmlCoverage = new();
@@ -71,6 +80,7 @@ internal sealed partial class TopoForm : Form
     private readonly Label tileOneMeterValue = new();
     private readonly Label tileOprValue = new();
     private readonly Label tileTenMeterValue = new();
+    private readonly Label tileGlobalValue = new();
     private readonly Label tileFailuresValue = new();
     private readonly Label dmTotalValue = new();
     private readonly Label dmProcessedValue = new();
@@ -78,7 +88,10 @@ internal sealed partial class TopoForm : Form
     private readonly Label dmOneMeterValue = new();
     private readonly Label dmOprValue = new();
     private readonly Label dmTenMeterValue = new();
+    private readonly Label dmGlobalValue = new();
     private readonly Label dmFailuresValue = new();
+    private readonly Label globalModeIndicator = new();
+    private readonly System.Windows.Forms.Timer statusActivityTimer = new() { Interval = 1000 };
     private readonly TextBox logText = new();
     private readonly StringBuilder statusLineBuffer = new();
     private readonly StatusCounters routeStatus = new();
@@ -93,13 +106,19 @@ internal sealed partial class TopoForm : Form
     private TextWriter? previousOut;
     private TextWriter? previousError;
     private StreamWriter? logFileWriter;
+    private bool cacheExitDecisionMade;
+    private bool operationFailed;
+    private bool uiSoundsEnabled;
+    private string operationMessage = "";
+    private bool operationMessageAnimated;
+    private int activityBulletCount;
 
     public TopoForm()
     {
         Text = "SCO LIDEX";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(920, 960);
-        Size = new Size(940, 1010);
+        MinimumSize = new Size(960, 1000);
+        Size = new Size(980, 1050);
         DoubleBuffered = true;
         ResizeRedraw = true;
         BackColor = AppBackColor;
@@ -275,7 +294,7 @@ internal sealed partial class TopoForm : Form
             Anchor = AnchorStyles.Right,
             Font = new Font("Segoe UI", 10, FontStyle.Regular),
             ForeColor = AccentColor,
-            Text = "USGS 1m LIDAR Cloud Service Data",
+            Text = "USGS + Copernicus Public Elevation Data",
             Margin = new Padding(0),
         };
         footer.Controls.Add(licenseTag, 0, 0);
@@ -287,10 +306,25 @@ internal sealed partial class TopoForm : Form
         trackDatabaseCoverage.CheckedChanged += (_, _) => UpdateRadiusState();
         textFileCoverage.CheckedChanged += (_, _) => UpdateRadiusState();
         distantMountains.CheckedChanged += (_, _) => loTileRadius.Enabled = distantMountains.Checked;
+        experimentalOutput.CheckedChanged += (_, _) =>
+        {
+            if (experimentalOutput.Checked)
+            {
+                createRouteTiles.Checked = true;
+                distantMountains.Checked = false;
+                overwriteMode.Checked = true;
+            }
+            SetRunning(runCancellation is not null);
+        };
         WireScanInvalidation();
+        statusActivityTimer.Tick += StatusActivityTimer_Tick;
+        FormClosing += TopoForm_FormClosing;
+        FormClosed += (_, _) => statusActivityTimer.Dispose();
         routePathText.Text = LoadLastRoutePath();
         ResetStatus();
         SetRunning(false);
+        WireToggleSounds(this);
+        Shown += (_, _) => uiSoundsEnabled = true;
     }
 
     // Build the top half of the form from small panels instead of the designer.
@@ -301,13 +335,15 @@ internal sealed partial class TopoForm : Form
         TableLayoutPanel panel = new()
         {
             Dock = DockStyle.Top,
-            ColumnCount = 2,
+            ColumnCount = 4,
             AutoSize = true,
             Padding = new Padding(0, 12, 0, 6),
             BackColor = AppBackColor,
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         panel.Controls.Add(new Label { AutoSize = true, Text = "Route Path:", Anchor = AnchorStyles.Left, ForeColor = TextColor }, 0, 0);
         routePathText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
@@ -315,6 +351,18 @@ internal sealed partial class TopoForm : Form
         routePathText.ForeColor = TextColor;
         routePathText.BorderStyle = BorderStyle.FixedSingle;
         panel.Controls.Add(routePathText, 1, 0);
+
+        routeHistoryButton.Text = "Recent ▼";
+        routeHistoryButton.Anchor = AnchorStyles.Left;
+        routeHistoryButton.Click += ShowRouteHistory_Click;
+        StyleButton(routeHistoryButton, primary: true);
+        panel.Controls.Add(routeHistoryButton, 2, 0);
+
+        browseRouteButton.Text = "Browse...";
+        browseRouteButton.Anchor = AnchorStyles.Left;
+        browseRouteButton.Click += BrowseRoute_Click;
+        StyleButton(browseRouteButton);
+        panel.Controls.Add(browseRouteButton, 3, 0);
         return panel;
     }
 
@@ -335,6 +383,14 @@ internal sealed partial class TopoForm : Form
         button.FlatAppearance.BorderSize = 1;
         button.UseVisualStyleBackColor = false;
         button.Tag = primary;
+        button.MouseDown += (_, _) => UiSounds.PlayPress();
+        button.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode is Keys.Enter or Keys.Space)
+            {
+                UiSounds.PlayPress();
+            }
+        };
         button.EnabledChanged += (_, _) => UpdateButtonVisual(button);
         UpdateButtonVisual(button);
     }
@@ -343,6 +399,22 @@ internal sealed partial class TopoForm : Form
     {
         button.Tag = primary;
         UpdateButtonVisual(button);
+    }
+
+    private static void WireToggleSounds(Control parent)
+    {
+        foreach (Control control in parent.Controls)
+        {
+            if (control is CheckBox or RadioButton)
+            {
+                control.Click += (_, _) => UiSounds.PlayTic();
+            }
+
+            if (control.HasChildren)
+            {
+                WireToggleSounds(control);
+            }
+        }
     }
 
     private static void UpdateButtonVisual(Button button)
@@ -366,8 +438,8 @@ internal sealed partial class TopoForm : Form
         Panel panel = new()
         {
             Dock = DockStyle.Top,
-            Height = 472,
-            MinimumSize = new Size(0, 472),
+            Height = 512,
+            MinimumSize = new Size(0, 512),
             BackColor = AppBackColor,
         };
 
@@ -390,7 +462,7 @@ internal sealed partial class TopoForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 2,
+            RowCount = 3,
             Padding = new Padding(6, 8, 0, 0),
             BackColor = PanelBackColor,
             ForeColor = TextColor,
@@ -399,11 +471,15 @@ internal sealed partial class TopoForm : Form
         optionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         createRouteTiles.Text = "Create Route Tiles";
         createRouteTiles.AutoSize = true;
         createRouteTiles.Checked = true;
         distantMountains.Text = "Create DM Tiles";
         distantMountains.AutoSize = true;
+        createMapTiles.Text = "Create Map Tiles";
+        createMapTiles.AutoSize = true;
+        createMapTiles.Enabled = true;
         cleanTileTemplate.Text = "Clean Tile Wipe (Destructive)";
         cleanTileTemplate.AutoSize = true;
         scanOverride.Text = "Scan Override";
@@ -412,10 +488,12 @@ internal sealed partial class TopoForm : Form
         cleanTileTemplate.Margin = new Padding(3, 0, 3, 3);
         distantMountains.Margin = new Padding(3, 3, 3, 3);
         scanOverride.Margin = new Padding(3, 3, 3, 3);
+        createMapTiles.Margin = new Padding(3, 3, 3, 3);
         optionPanel.Controls.Add(createRouteTiles, 0, 0);
         optionPanel.Controls.Add(cleanTileTemplate, 1, 0);
         optionPanel.Controls.Add(distantMountains, 0, 1);
         optionPanel.Controls.Add(scanOverride, 1, 1);
+        optionPanel.Controls.Add(createMapTiles, 0, 2);
         optionBox.Controls.Add(optionPanel);
 
         GroupBox coverageBox = new() { Text = "Selection" };
@@ -480,11 +558,13 @@ internal sealed partial class TopoForm : Form
         coverage.Controls.Add(loTileRadius, 1, 7);
 
         coverageBox.Controls.Add(coverage);
+        Control outputPanel = BuildOutputPanel();
         Control postProcessPanel = BuildPostProcessPanel();
         Control statusPanel = BuildStatusPanel();
         panel.Controls.Add(modeBox);
         panel.Controls.Add(optionBox);
         panel.Controls.Add(coverageBox);
+        panel.Controls.Add(outputPanel);
         panel.Controls.Add(postProcessPanel);
         panel.Controls.Add(statusPanel);
 
@@ -493,16 +573,44 @@ internal sealed partial class TopoForm : Form
             int gap = 8;
             int columnWidth = (panel.ClientSize.Width - gap) / 2;
             int rightX = columnWidth + gap;
-            modeBox.SetBounds(0, 0, columnWidth, 90);
-            optionBox.SetBounds(rightX, 0, panel.ClientSize.Width - rightX, 90);
-            coverageBox.SetBounds(0, 100, columnWidth, 364);
-            statusPanel.SetBounds(rightX, 100, panel.ClientSize.Width - rightX, 192);
-            postProcessPanel.SetBounds(rightX, 300, panel.ClientSize.Width - rightX, 164);
+            modeBox.SetBounds(0, 0, columnWidth, 114);
+            optionBox.SetBounds(rightX, 0, panel.ClientSize.Width - rightX, 114);
+            coverageBox.SetBounds(0, 124, columnWidth, 286);
+            outputPanel.SetBounds(0, 418, columnWidth, 94);
+            statusPanel.SetBounds(rightX, 124, panel.ClientSize.Width - rightX, 216);
+            postProcessPanel.SetBounds(rightX, 348, panel.ClientSize.Width - rightX, 164);
         }
 
         panel.Resize += (_, _) => LayoutOptionControls();
         panel.HandleCreated += (_, _) => LayoutOptionControls();
         return panel;
+    }
+
+    private Control BuildOutputPanel()
+    {
+        GroupBox outputBox = new() { Text = "Terrain Output" };
+        StyleGroupBox(outputBox);
+        FlowLayoutPanel outputFlow = new()
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Padding = new Padding(6, 8, 0, 0),
+            BackColor = PanelBackColor,
+            ForeColor = TextColor,
+        };
+
+        normalOutput.Text = "Normal - 8 m";
+        normalOutput.AutoSize = true;
+        normalOutput.Checked = true;
+        normalOutput.Enabled = false;
+        experimentalOutput.Text = "Experimental - 4 m";
+        experimentalOutput.AutoSize = true;
+        experimentalOutput.Enabled = Program.Experimental4mExportEnabled;
+        outputFlow.Controls.Add(normalOutput);
+        outputFlow.Controls.Add(experimentalOutput);
+        outputBox.Controls.Add(outputFlow);
+        return outputBox;
     }
 
     // Bias controls serve two purposes: during Run they shift where DEM samples
@@ -634,18 +742,18 @@ internal sealed partial class TopoForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 3,
-            RowCount = 8,
+            RowCount = 9,
             AutoSize = false,
             Padding = new Padding(6, 4, 6, 4),
             BackColor = PanelBackColor,
             ForeColor = TextColor,
         };
-        status.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48));
-        status.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26));
-        status.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26));
-        for (int row = 0; row < 8; row++)
+        status.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56));
+        status.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
+        status.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
+        for (int row = 0; row < 9; row++)
         {
-            status.RowStyles.Add(new RowStyle(SizeType.Percent, 12.5f));
+            status.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / 9f));
         }
 
         AddStatusHeader(status, "Tiles", 1);
@@ -655,8 +763,9 @@ internal sealed partial class TopoForm : Form
         AddStatusRow(status, 3, "• 1m", tileOneMeterValue, dmOneMeterValue, indentTitle: true);
         AddStatusRow(status, 4, "• 5m~", tileOprValue, dmOprValue, indentTitle: true);
         AddStatusRow(status, 5, "• 10m", tileTenMeterValue, dmTenMeterValue, indentTitle: true);
-        AddStatusRow(status, 6, "Skip", tileSkippedValue, dmSkippedValue);
-        AddStatusRow(status, 7, "Fail", tileFailuresValue, dmFailuresValue);
+        AddStatusRow(status, 6, "• 30m (global)", tileGlobalValue, dmGlobalValue, indentTitle: true);
+        AddStatusRow(status, 7, "Skip", tileSkippedValue, dmSkippedValue);
+        AddStatusRow(status, 8, "Fail", tileFailuresValue, dmFailuresValue);
         statusBox.Controls.Add(status);
         return statusBox;
     }
@@ -699,9 +808,10 @@ internal sealed partial class TopoForm : Form
             Dock = DockStyle.Top,
             Padding = new Padding(0, 8, 0, 8),
             AutoSize = true,
-            ColumnCount = 2,
+            ColumnCount = 3,
             BackColor = AppBackColor,
         };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         FlowLayoutPanel leftButtons = new()
@@ -745,8 +855,23 @@ internal sealed partial class TopoForm : Form
         helpButton.Click += Help_Click;
         rightButtons.Controls.Add(contactButton);
         rightButtons.Controls.Add(helpButton);
+
+        globalModeIndicator.AutoSize = false;
+        globalModeIndicator.Size = new Size(230, 28);
+        globalModeIndicator.MinimumSize = new Size(230, 28);
+        globalModeIndicator.Text = "READY";
+        globalModeIndicator.TextAlign = ContentAlignment.MiddleCenter;
+        globalModeIndicator.Font = new Font("Segoe UI Semibold", 9, FontStyle.Bold);
+        globalModeIndicator.ForeColor = WarningColor;
+        globalModeIndicator.BackColor = Color.FromArgb(247, 231, 196);
+        globalModeIndicator.BorderStyle = BorderStyle.FixedSingle;
+        globalModeIndicator.Margin = new Padding(4, 3, 4, 3);
+        globalModeIndicator.Anchor = AnchorStyles.None;
+        globalModeIndicator.Visible = true;
+
         panel.Controls.Add(leftButtons, 0, 0);
-        panel.Controls.Add(rightButtons, 1, 0);
+        panel.Controls.Add(globalModeIndicator, 1, 0);
+        panel.Controls.Add(rightButtons, 2, 0);
         return panel;
     }
 
@@ -1022,9 +1147,11 @@ internal sealed partial class TopoForm : Form
         }
 
         routePathText.Text = routePath;
+        operationFailed = false;
         SaveLastRoutePath(routePath);
         logText.Clear();
         ResetStatus();
+        SetOperationMessage("SCANNING");
         scanPassed = false;
         scanLocked = true;
         SetScanning(true);
@@ -1042,6 +1169,7 @@ internal sealed partial class TopoForm : Form
             Program.ScanOptions options = new(
                 CreateRouteTiles: createRouteTiles.Checked,
                 CreateDistantMountains: distantMountains.Checked,
+                CreateMapTiles: createMapTiles.Checked,
                 MarkerCoverage: markerCoverage.Checked,
                 TrackDatabaseCoverage: trackDatabaseCoverage.Checked,
                 KmlCoverage: kmlCoverage.Checked,
@@ -1057,17 +1185,20 @@ internal sealed partial class TopoForm : Form
             dmStatus.Failures = summary.UnreadableDistantMountainTiles;
             UpdateStatusDisplay();
             scanPassed = summary.CanRun;
+            SetOperationMessage(scanPassed ? "SCAN COMPLETE" : "SCAN FAILED");
             AppendLog(scanPassed
                 ? $"{Environment.NewLine}Scan passed. Run is enabled. Use Abort to unlock and change settings.{Environment.NewLine}"
                 : $"{Environment.NewLine}Scan failed. Fix blocking issues, then scan again.{Environment.NewLine}");
         }
         catch (OperationCanceledException)
         {
+            SetOperationMessage("SCAN ABORTED");
             AppendLog($"{Environment.NewLine}Scan aborted. Settings unlocked.{Environment.NewLine}");
             ResetScanState();
         }
         catch (Exception ex)
         {
+            SetOperationMessage("SCAN FAILED");
             AppendLog($"Error: {ex.Message}{Environment.NewLine}");
             scanPassed = false;
         }
@@ -1100,7 +1231,26 @@ internal sealed partial class TopoForm : Form
             return;
         }
 
+        if (experimentalOutput.Checked)
+        {
+            DialogResult experimentalConfirm = MessageBox.Show(
+                this,
+                "Create the EXPERIMENTAL 4m terrain test?" + Environment.NewLine + Environment.NewLine +
+                "Every normal terrain tile in this route will be rebuilt as a 512x512, 4m grid. " +
+                "Distant Mountains will not be generated. This format requires the matching Open Rails development build." +
+                Environment.NewLine + Environment.NewLine + "Use only on a backed-up test route.",
+                "SCO LIDEX - Experimental 4m Test",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Warning);
+            if (experimentalConfirm != DialogResult.OK)
+            {
+                return;
+            }
+        }
+
         routePathText.Text = routePath;
+        operationFailed = false;
+        SetOperationMessage("STARTING OPERATION");
         SaveLastRoutePath(routePath);
         SetRunning(true);
         logText.Clear();
@@ -1113,6 +1263,7 @@ internal sealed partial class TopoForm : Form
         Console.SetOut(writer);
         Console.SetError(writer);
         Program.ResetUsgsDataCounter();
+        Program.ResetCopernicusDataCounter();
         Stopwatch runTimer = Stopwatch.StartNew();
 
         try
@@ -1122,6 +1273,7 @@ internal sealed partial class TopoForm : Form
         }
         catch (Exception ex)
         {
+            SetOperationMessage("OPERATION FAILED");
             AppendLog($"Error: {ex.Message}{Environment.NewLine}");
         }
         finally
@@ -1130,6 +1282,7 @@ internal sealed partial class TopoForm : Form
             AppendLog(
                 $"{Environment.NewLine}Elapsed time: {FormatElapsed(runTimer.Elapsed)}{Environment.NewLine}" +
                 $"USGS data read: {Program.FormatUsgsDataBytesRead()}{Environment.NewLine}");
+            AppendLog($"Copernicus data read: {Program.FormatCopernicusDataBytesRead()}{Environment.NewLine}");
             Console.SetOut(previousOut);
             Console.SetError(previousError);
             logFileWriter?.Dispose();
@@ -1138,6 +1291,10 @@ internal sealed partial class TopoForm : Form
             runCancellation = null;
             ResetScanState();
             SetRunning(false);
+            if (!operationFailed)
+            {
+                SetOperationMessage("OPERATION COMPLETE");
+            }
         }
     }
 
@@ -1233,6 +1390,52 @@ internal sealed partial class TopoForm : Form
         }
     }
 
+    private void BrowseRoute_Click(object? sender, EventArgs e)
+    {
+        string currentPath = NormalizeRoutePath(routePathText.Text);
+        using FolderBrowserDialog dialog = new()
+        {
+            Description = "Select an Open Rails route folder",
+            UseDescriptionForTitle = true,
+            SelectedPath = Directory.Exists(currentPath) ? currentPath : "",
+            ShowNewFolderButton = false,
+            AutoUpgradeEnabled = true,
+        };
+
+        try
+        {
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            string selectedPath = NormalizeRoutePath(dialog.SelectedPath);
+            if (!IsValidRouteFolder(selectedPath))
+            {
+                MessageBox.Show(
+                    this,
+                    "The selected folder is not an Open Rails route folder. Select a folder containing a .trk file.",
+                    "SCO LIDEX",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            routePathText.Text = selectedPath;
+            routePathText.SelectionStart = routePathText.Text.Length;
+            SaveLastRoutePath(selectedPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                $"Windows could not open the route folder browser.{Environment.NewLine}{Environment.NewLine}{ex.Message}{Environment.NewLine}{Environment.NewLine}You can still type or paste the route path.",
+                "SCO LIDEX",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
     private static string NormalizeRoutePath(string path)
     {
         string value = path.Trim('"', ' ');
@@ -1261,10 +1464,107 @@ internal sealed partial class TopoForm : Form
         {
             Directory.CreateDirectory(SettingsDirectory);
             File.WriteAllText(LastRoutePathFile, routePath);
+            SaveRouteHistoryEntry(routePath);
         }
         catch
         {
             // Remembering the route is convenience-only; never block a terrain run for it.
+        }
+    }
+
+    private void ShowRouteHistory_Click(object? sender, EventArgs e)
+    {
+        List<string> routes = LoadRouteHistory();
+        routeHistoryMenu.Items.Clear();
+        routeHistoryMenu.ShowImageMargin = false;
+        routeHistoryMenu.Font = Font;
+
+        if (routes.Count == 0)
+        {
+            routeHistoryMenu.Items.Add(new ToolStripMenuItem("No recent valid routes") { Enabled = false });
+        }
+        else
+        {
+            foreach (string route in routes)
+            {
+                ToolStripMenuItem item = new(route) { ToolTipText = route };
+                item.Click += (_, _) =>
+                {
+                    routePathText.Text = route;
+                    routePathText.SelectionStart = routePathText.Text.Length;
+                    routePathText.Focus();
+                    SaveLastRoutePath(route);
+                };
+                routeHistoryMenu.Items.Add(item);
+            }
+        }
+
+        routeHistoryMenu.Show(routeHistoryButton, new Point(0, routeHistoryButton.Height));
+    }
+
+    private static List<string> LoadRouteHistory()
+    {
+        try
+        {
+            List<string> saved = File.Exists(RouteHistoryFile)
+                ? JsonSerializer.Deserialize<List<string>>(File.ReadAllText(RouteHistoryFile)) ?? []
+                : [];
+            string lastRoute = LoadLastRoutePath();
+            IEnumerable<string> candidates = IsValidRouteFolder(lastRoute)
+                ? saved.Prepend(lastRoute)
+                : saved;
+            List<string> valid = candidates
+                .Select(NormalizeRoutePath)
+                .Where(IsValidRouteFolder)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(MaximumRouteHistoryEntries)
+                .ToList();
+
+            if (!saved.SequenceEqual(valid, StringComparer.OrdinalIgnoreCase))
+            {
+                WriteRouteHistory(valid);
+            }
+
+            return valid;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static void SaveRouteHistoryEntry(string routePath)
+    {
+        string normalized = NormalizeRoutePath(routePath);
+        if (!IsValidRouteFolder(normalized))
+        {
+            return;
+        }
+
+        List<string> routes = LoadRouteHistory();
+        routes.RemoveAll(path => string.Equals(path, normalized, StringComparison.OrdinalIgnoreCase));
+        routes.Insert(0, normalized);
+        WriteRouteHistory(routes.Take(MaximumRouteHistoryEntries).ToList());
+    }
+
+    private static void WriteRouteHistory(List<string> routes)
+    {
+        Directory.CreateDirectory(SettingsDirectory);
+        File.WriteAllText(
+            RouteHistoryFile,
+            JsonSerializer.Serialize(routes, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static bool IsValidRouteFolder(string routePath)
+    {
+        try
+        {
+            return Directory.Exists(routePath) &&
+                   Directory.EnumerateFiles(routePath, "*.trk", SearchOption.TopDirectoryOnly).Any();
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -1318,6 +1618,16 @@ internal sealed partial class TopoForm : Form
             args.Add(((int)loTileRadius.Value).ToString());
         }
 
+        if (createMapTiles.Checked)
+        {
+            args.Add("--map-tiles");
+        }
+
+        if (experimentalOutput.Checked)
+        {
+            args.Add("--experimental-4m-test");
+        }
+
         int eastWestBias = (int)postEastWestShiftValue.Value;
         int northSouthBias = (int)postNorthSouthShiftValue.Value;
         if (eastWestBias != 0)
@@ -1344,6 +1654,9 @@ internal sealed partial class TopoForm : Form
             $"Mode: {(overwriteMode.Checked ? "Overwrite" : "Append")}{Environment.NewLine}" +
             $"Create Route Tiles: {YesNo(createRouteTiles.Checked)}{Environment.NewLine}" +
             $"Create Distant Mountains: {YesNo(distantMountains.Checked)}{Environment.NewLine}" +
+            $"Create Map Tiles: {YesNo(createMapTiles.Checked)}{Environment.NewLine}" +
+            $"Terrain Output: {(experimentalOutput.Checked ? "EXPERIMENTAL - 4m TEST" : "Normal - 8m")}{Environment.NewLine}" +
+            $"Global DEM fallback: 30m (global) - Copernicus DEM GLO-30 Public, anonymous AWS Open Data, low resolution DSM{Environment.NewLine}" +
             $"Clean Tile Wipe: {YesNo(cleanTileTemplate.Checked)}{Environment.NewLine}" +
             $"Scan Override: {YesNo(scanOverride.Checked)}{Environment.NewLine}" +
             $"Selection: {GetSelectionText()}{Environment.NewLine}" +
@@ -1432,9 +1745,12 @@ internal sealed partial class TopoForm : Form
         runButton.Enabled = !busy && (scanPassed || scanOverride.Checked);
         abortButton.Enabled = busy || scanLocked;
         routePathText.Enabled = !locked;
+        routeHistoryButton.Enabled = !locked;
+        browseRouteButton.Enabled = !locked;
         appendMode.Enabled = !locked;
         overwriteMode.Enabled = !locked;
-        createRouteTiles.Enabled = !locked;
+        createRouteTiles.Enabled = !locked && !experimentalOutput.Checked;
+        createMapTiles.Enabled = !locked;
         cleanTileTemplate.Enabled = !locked;
         scanOverride.Enabled = !busy && !scanLocked;
         existingTilesCoverage.Enabled = !locked;
@@ -1443,8 +1759,10 @@ internal sealed partial class TopoForm : Form
         trackDatabaseCoverage.Enabled = !locked;
         textFileCoverage.Enabled = !locked;
         terrainRadius.Enabled = !locked && UsesTileRadius();
-        distantMountains.Enabled = !locked;
-        loTileRadius.Enabled = !locked && distantMountains.Checked;
+        distantMountains.Enabled = !locked && !experimentalOutput.Checked;
+        loTileRadius.Enabled = !locked && !experimentalOutput.Checked && distantMountains.Checked;
+        normalOutput.Enabled = false;
+        experimentalOutput.Enabled = !locked && Program.Experimental4mExportEnabled;
         postEastWestShiftSlider.Enabled = !locked;
         postEastWestShiftValue.Enabled = !locked;
         postNorthSouthShiftSlider.Enabled = !locked;
@@ -1468,6 +1786,88 @@ internal sealed partial class TopoForm : Form
         scanPassed = false;
         scanLocked = false;
         SetRunning(runCancellation is not null);
+    }
+
+    private void TopoForm_FormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (e.CloseReason != CloseReason.UserClosing || cacheExitDecisionMade)
+        {
+            return;
+        }
+
+        if (runCancellation is not null || scanCancellation is not null)
+        {
+            e.Cancel = true;
+            MessageBox.Show(
+                this,
+                "Abort the active operation before exiting SCO LIDEX.",
+                "SCO LIDEX",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        string cachePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SCOLIDEX",
+            "map-data");
+        if (!Directory.Exists(cachePath))
+        {
+            return;
+        }
+
+        FileInfo[] files;
+        try
+        {
+            files = new DirectoryInfo(cachePath)
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            e.Cancel = true;
+            MessageBox.Show(
+                this,
+                $"SCO LIDEX could not inspect the map cache:\n\n{ex.Message}",
+                "SCO LIDEX - Map Cache",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return;
+        }
+
+        if (files.Length == 0)
+        {
+            return;
+        }
+
+        using MapCacheExitDialog dialog = new(cachePath, files);
+        DialogResult result = dialog.ShowDialog(this);
+        if (result == DialogResult.Cancel)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        if (result == DialogResult.No)
+        {
+            try
+            {
+                Directory.Delete(cachePath, recursive: true);
+            }
+            catch (Exception ex)
+            {
+                e.Cancel = true;
+                MessageBox.Show(
+                    this,
+                    $"The map cache could not be purged:\n\n{ex.Message}",
+                    "SCO LIDEX - Map Cache",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+        }
+
+        cacheExitDecisionMade = true;
     }
 
     private bool UsesTileRadius()
@@ -1496,7 +1896,10 @@ internal sealed partial class TopoForm : Form
         appendMode.CheckedChanged += invalidate;
         overwriteMode.CheckedChanged += invalidate;
         createRouteTiles.CheckedChanged += invalidate;
+        createMapTiles.CheckedChanged += invalidate;
         distantMountains.CheckedChanged += invalidate;
+        normalOutput.CheckedChanged += invalidate;
+        experimentalOutput.CheckedChanged += invalidate;
         cleanTileTemplate.CheckedChanged += invalidate;
         scanOverride.CheckedChanged += (_, _) =>
         {
@@ -1624,6 +2027,7 @@ internal sealed partial class TopoForm : Form
     {
         routeStatus.Reset();
         dmStatus.Reset();
+        SetOperationMessage("READY");
         readingDistantMountainOutput = false;
         activeDmIndex = 0;
         statusLineBuffer.Clear();
@@ -1659,6 +2063,13 @@ internal sealed partial class TopoForm : Form
             return;
         }
 
+        const string statusPrefix = "STATUS: ";
+        int statusIndex = line.IndexOf(statusPrefix, StringComparison.OrdinalIgnoreCase);
+        if (statusIndex >= 0)
+        {
+            SetOperationMessage(line[(statusIndex + statusPrefix.Length)..].Trim());
+        }
+
         Match dmStart = DistantMountainStartRegex().Match(line);
         if (dmStart.Success)
         {
@@ -1685,6 +2096,11 @@ internal sealed partial class TopoForm : Form
             if (ParseNumber(dmPrepared.Groups["ten"].Value) > 0)
             {
                 dmStatus.TenMeter++;
+            }
+
+            if (ParseNumber(dmPrepared.Groups["global"].Value) > 0)
+            {
+                dmStatus.Global++;
             }
 
             UpdateStatusDisplay();
@@ -1751,6 +2167,12 @@ internal sealed partial class TopoForm : Form
                 routeStatus.TenMeter++;
             }
 
+            if (ParseNumber(routeSources.Groups["global"].Value) > 0)
+            {
+                routeStatus.Global++;
+                SetOperationMessage("TILES - GLOBAL - LOW RES");
+            }
+
             UpdateStatusDisplay();
             return;
         }
@@ -1783,8 +2205,86 @@ internal sealed partial class TopoForm : Form
             routeStatus.OneMeter = ParseNumber(sourceUseSummary.Groups["primary"].Value);
             routeStatus.Opr = ParseNumber(sourceUseSummary.Groups["opr"].Value);
             routeStatus.TenMeter = ParseNumber(sourceUseSummary.Groups["ten"].Value);
+            routeStatus.Global = ParseNumber(sourceUseSummary.Groups["global"].Value);
             UpdateStatusDisplay();
         }
+    }
+
+    private void SetOperationMessage(string message)
+    {
+        message = message.Trim();
+        if (string.Equals(operationMessage, message, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        operationMessage = message;
+        operationMessageAnimated = !IsFinalOperationMessage(message);
+        activityBulletCount = 0;
+        statusActivityTimer.Stop();
+
+        if (message.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("ABORT", StringComparison.OrdinalIgnoreCase))
+        {
+            operationFailed = true;
+        }
+        globalModeIndicator.Text = message;
+        globalModeIndicator.Visible = true;
+        globalModeIndicator.ForeColor = WarningColor;
+        globalModeIndicator.BackColor = Color.FromArgb(247, 231, 196);
+
+        if (operationMessageAnimated)
+        {
+            statusActivityTimer.Start();
+        }
+
+        if (!uiSoundsEnabled)
+        {
+            return;
+        }
+
+        if (string.Equals(message, "SCAN COMPLETE", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(message, "OPERATION COMPLETE", StringComparison.OrdinalIgnoreCase))
+        {
+            UiSounds.PlayChirp();
+        }
+        else if (message.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
+                 message.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
+                 message.Contains("ABORT", StringComparison.OrdinalIgnoreCase))
+        {
+            UiSounds.PlayBuzz();
+        }
+        else
+        {
+            UiSounds.PlayClick();
+        }
+    }
+
+    private void StatusActivityTimer_Tick(object? sender, EventArgs e)
+    {
+        if (!operationMessageAnimated || string.IsNullOrWhiteSpace(operationMessage))
+        {
+            statusActivityTimer.Stop();
+            return;
+        }
+
+        activityBulletCount = (activityBulletCount + 1) % 4;
+        globalModeIndicator.Text = activityBulletCount switch
+        {
+            1 => $"• {operationMessage} •",
+            2 => $"• • {operationMessage} • •",
+            3 => $"• • • {operationMessage} • • •",
+            _ => operationMessage,
+        };
+    }
+
+    private static bool IsFinalOperationMessage(string message)
+    {
+        return message.Contains("COMPLETE", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("ABORT", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(message, "READY", StringComparison.OrdinalIgnoreCase);
     }
 
     private void UpdateStatusDisplay()
@@ -1795,6 +2295,7 @@ internal sealed partial class TopoForm : Form
         tileOneMeterValue.Text = routeStatus.OneMeter.ToString("N0");
         tileOprValue.Text = routeStatus.Opr.ToString("N0");
         tileTenMeterValue.Text = routeStatus.TenMeter.ToString("N0");
+        tileGlobalValue.Text = routeStatus.Global.ToString("N0");
         tileFailuresValue.Text = routeStatus.Failures.ToString("N0");
         bool showDm = distantMountains.Checked || dmStatus.Total > 0 || dmStatus.Processed > 0 || dmStatus.Skipped > 0 || dmStatus.Failures > 0;
         dmTotalValue.Text = showDm ? dmStatus.Total.ToString("N0") : "";
@@ -1803,6 +2304,7 @@ internal sealed partial class TopoForm : Form
         dmOneMeterValue.Text = "";
         dmOprValue.Text = "";
         dmTenMeterValue.Text = showDm ? dmStatus.TenMeter.ToString("N0") : "";
+        dmGlobalValue.Text = showDm ? dmStatus.Global.ToString("N0") : "";
         dmFailuresValue.Text = showDm ? dmStatus.Failures.ToString("N0") : "";
         UpdateStatusColors(showDm);
     }
@@ -1814,6 +2316,7 @@ internal sealed partial class TopoForm : Form
         ColorizeValue(tileOneMeterValue, routeStatus.OneMeter, MutedTextColor);
         ColorizeValue(tileOprValue, routeStatus.Opr, MutedTextColor);
         ColorizeValue(tileTenMeterValue, routeStatus.TenMeter, MutedTextColor);
+        ColorizeValue(tileGlobalValue, routeStatus.Global, MutedTextColor);
         ColorizeValue(tileSkippedValue, routeStatus.Skipped, MutedTextColor);
         ColorizeValue(tileFailuresValue, routeStatus.Failures, DangerColor);
 
@@ -1821,6 +2324,7 @@ internal sealed partial class TopoForm : Form
         ColorizeValue(dmProcessedValue, showDm ? dmStatus.Processed : 0, MutedTextColor);
         ColorizeValue(dmSkippedValue, showDm ? dmStatus.Skipped : 0, MutedTextColor);
         ColorizeValue(dmTenMeterValue, showDm ? dmStatus.TenMeter : 0, MutedTextColor);
+        ColorizeValue(dmGlobalValue, showDm ? dmStatus.Global : 0, MutedTextColor);
         ColorizeValue(dmFailuresValue, showDm ? dmStatus.Failures : 0, DangerColor);
     }
 
@@ -1865,6 +2369,7 @@ internal sealed partial class TopoForm : Form
         public int OneMeter { get; set; }
         public int Opr { get; set; }
         public int TenMeter { get; set; }
+        public int Global { get; set; }
         public int Failures { get; set; }
 
         public void Reset()
@@ -1875,6 +2380,7 @@ internal sealed partial class TopoForm : Form
             OneMeter = 0;
             Opr = 0;
             TenMeter = 0;
+            Global = 0;
             Failures = 0;
         }
     }
@@ -1894,16 +2400,16 @@ internal sealed partial class TopoForm : Form
     [GeneratedRegex(@"\[DM\s+(?<index>[\d,]+)/(?<total>[\d,]+)\]", RegexOptions.IgnoreCase)]
     private static partial Regex DistantMountainTileRegex();
 
-    [GeneratedRegex(@"Prepared TSRE-style lo_tile with 10m=(?<ten>[\d,]+),", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"Prepared TSRE-style lo_tile with 10m=(?<ten>[\d,]+),\s+30m \(global\)=(?<global>[\d,]+),", RegexOptions.IgnoreCase)]
     private static partial Regex DistantMountainPreparedRegex();
 
     [GeneratedRegex(@"Distant Mountains done\.\s+Generated=(?<generated>[\d,]+),\s+skipped=(?<skipped>[\d,]+),\s+failed=(?<failed>[\d,]+),\s+total=(?<total>[\d,]+)", RegexOptions.IgnoreCase)]
     private static partial Regex DistantMountainDoneRegex();
 
-    [GeneratedRegex(@"Source samples used:\s+1m=(?<primary>[\d,]+),\s+5m~=(?<opr>[\d,]+),\s+10m=(?<ten>[\d,]+),", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"Source samples used:\s+1m=(?<primary>[\d,]+),\s+5m~=(?<opr>[\d,]+),\s+10m=(?<ten>[\d,]+),\s+30m \(global\)=(?<global>[\d,]+),", RegexOptions.IgnoreCase)]
     private static partial Regex RouteSourceSamplesRegex();
 
-    [GeneratedRegex(@"Source use summary:\s+tiles using 1m=(?<primary>[\d,]+),\s+5m~=(?<opr>[\d,]+),\s+10m=(?<ten>[\d,]+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"Source use summary:\s+tiles using 1m=(?<primary>[\d,]+),\s+5m~=(?<opr>[\d,]+),\s+10m=(?<ten>[\d,]+),\s+30m \(global\)=(?<global>[\d,]+)", RegexOptions.IgnoreCase)]
     private static partial Regex SourceUseSummaryRegex();
 
 }

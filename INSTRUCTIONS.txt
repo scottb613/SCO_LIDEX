@@ -22,7 +22,11 @@ SCOLIDEX-win-x64\SCOLIDEX.exe
 
 3. Route Path
 -------------
-Paste the full route folder path into Route Path.
+Use Browse to select an Open Rails route folder, or type/paste its full path into
+Route Path. Use Recent to open a menu of the five most recent valid routes.
+The list is stored in
+%LocalAppData%\SCOLIDEX\route-history.json; folders that no longer exist or no
+longer contain a .trk file are removed automatically.
 
 Example:
 M:\OpenRails\Train Simulator\routes\MyRoute
@@ -48,6 +52,50 @@ Create DM Tiles:
   style used by SCO LIDEX. If detected during Run, they are purged and rebuilt
   as TSRE-style lo_tiles.
 
+Create Map Tiles:
+  Creates one 4096x4096 OpenStreetMap texture for each selected normal terrain
+  tile. Map tiles do not apply to Distant Mountain terrain.
+
+  Scan selects the smallest Geofabrik regional extract that covers the route,
+  reports its current download size/date, verifies the bundled OSM/PBF driver,
+  and checks map/terrain coordinate round trips and output names. Scan does not
+  download the regional PBF or modify the route.
+
+  Run asks for confirmation before downloading. The anonymous Geofabrik PBF is
+  resumable and cached under LocalAppData\SCOLIDEX\map-data. When SCO LIDEX
+  exits, it reports the exact cache size and offers Keep Cache, Purge Cache,
+  or Cancel Exit.
+  SCO LIDEX does not use the bulk-restricted public OpenStreetMap editing API.
+
+  Each map is written to TSRE's F3 terrain_maps\<tile-hash>.png cache using the
+  same X*10000+Y filename convention used by TSRE (TSRE map Y is the negative
+  of the terrain Z shown by LIDEX). A matching existing PNG is overwritten
+  directly. SCO LIDEX does not create a map ACE and does not change
+  terrain .t materials or patch UV assignments.
+
+  TSRE's existing Show/Hide Map command can load this PNG as the separate F3
+  overlay and reveal the unchanged terrain when hidden. SCO LIDEX cannot clear
+  or change an overlay already loaded by a running TSRE process; reopen or
+  reload the route when testing replaced cache images.
+
+  Map output uses compressed 4096x4096 PNG files in the route terrain_maps cache.
+  Processing loads selected-route geometry once and retains it while two 4096
+  bitmaps are rendered concurrently. Large routes still require substantial
+  time, memory, and disk space.
+
+  Every OSM vertex is projected into the exact tile-local meter frame used by
+  terrain sampling, including the standard 16m east/16m south correction or a
+  route's TsreGeoProjection. No API key, external route editor, or MSTS runtime
+  is required; bundled GDAL reads PBF and SCO LIDEX writes the TSRE F3 PNG
+  cache using TSRE's naming and projection behavior.
+
+  The reference map texture uses TSRE's OSM drawing style rather than a web
+  map-tile theme: warm off-white background, pale land-use polygons, outlined
+  buildings, railway styling, and two-pass cased roads. Primary highways use
+  TSRE's red center, secondary highways orange, tertiary highways yellow, and
+  motorway/trunk roads orange-red. The thin bright-red marker line shown by
+  TSRE is an editor/KML overlay and is not part of the map texture.
+
 Clean Tile Wipe (Destructive):
   Rebuilds terrain .t files from a clean template. This can repair corrupted
   terrain tiles but may wipe texture, water, overlay, or other tile-specific
@@ -64,7 +112,23 @@ Help:
   document. Text can be selected and copied, but the instructions cannot be
   accidentally edited from the Help window.
 
-6. Selection
+6. Terrain Output
+-----------------
+Normal - 8m:
+  Creates the standard Open Rails normal-terrain format using a 256x256 height
+  grid with 8m post spacing. This is the supported output for normal route use.
+
+Experimental - 4m:
+  Deactivated in this build. The control remains visible but disabled, and Scan
+  and Run always use Normal - 8m output.
+
+  The isolated test mechanism remains in source: 512x512 _y.raw writing, 4m
+  metadata, complete KML-footprint generation, shared edge/corner merging, no
+  DM, all-or-nothing terrain preparation, and optional maps. It can be restored
+  later with the single internal experimental feature switch after joint Open
+  Rails format testing resumes.
+
+7. Selection
 ------------
 Use Route Tiles:
   Uses existing route terrain tiles.
@@ -88,7 +152,7 @@ Use Track Database:
   Uses ROUTE\[RouteName].tdb. Tile Radius expands around tiles referenced by
   the track database.
 
-7. Radius
+8. Radius
 ---------
 Tile Radius:
   Applies to Marker, KML, and Track Database selections.
@@ -98,9 +162,21 @@ Tile Radius:
 
 DM Radius:
   Controls distant mountain coverage around the selected source.
-  Distant mountain tiles use 10m / 1/3 arc-second data.
+  Distant mountain tiles use 10m / 1/3 arc-second data where available and
+  fall back to 30m (global) Copernicus data outside US coverage.
 
-8. Normal terrain sampling
+Global elevation fallback:
+  SCO LIDEX tries USGS 1m, 5m~, and 10m sources first. Posts still lacking
+  coverage are read anonymously from Copernicus DEM GLO-30 Public on AWS Open
+  Data and are counted as 30m (global). This is low-resolution source data even
+  though it is resampled onto the normal ORTS 8m post grid.
+
+  Copernicus GLO-30 is a Digital Surface Model (DSM), so elevations may include
+  vegetation, buildings, and infrastructure. Missing public tiles are treated
+  as unavailable data, never silently as zero elevation. Ocean-only areas do
+  not publish COG tiles.
+
+9. Normal terrain sampling
 --------------------------
 Open Rails normal terrain tiles use a 256x256 _y.raw height grid. Those are
 height posts spaced 8m apart. Because there are 255 spaces between 256 posts,
@@ -113,8 +189,8 @@ improve alignment with route/map overlays.
 Distant Mountain tiles are much lower resolution and still use their existing
 lo_tile sampling behavior.
 
-9. Advanced Geo Bias
---------------------
+10. Advanced Geo Bias
+---------------------
 The N/S and E/W bias sliders shift terrain features in meters without moving
 the route tiles themselves. Positive values move terrain toward N or E, shown
 on the left side of each slider. Leave both at 0 unless you are calibrating a
@@ -151,8 +227,8 @@ Recommended workflow:
 Commit uses neighboring existing route tiles when the shift crosses a tile edge,
 then merges shared edges before writing. Back up your route before using Commit.
 
-10. TSRE alternate projection support
-------------------------------------
+11. TSRE alternate projection support
+-------------------------------------
 Some TSRE routes include a TsreGeoProjection statement in the route .trk file.
 This is a TSRE route-centered projection used to reduce local map skew, often
 for routes where street grids or other urban features need to line up more
@@ -178,14 +254,45 @@ This setting comes from TSRE and is route-specific. SCO LIDEX does not create
 or edit the TsreGeoProjection statement; it only reads and honors it when
 present.
 
-11. Logs and retry files
------------------------
+12. Logs and retry files
+------------------------
 SCO LIDEX writes SCOLIDEX.log on the user's Desktop.
 The log records the selected GUI settings at the start of each Scan, Run, or
 Post Process operation and records elapsed time at the end of write operations.
-Run logs also include a human-readable USGS data-read total, such as 10.24 MB
-or 1.53 GB. This is a practical estimate based on USGS product JSON plus the
-DEM raster windows SCO LIDEX asks GDAL to read.
+Run logs also include separate human-readable USGS and Copernicus data-read
+totals. These are practical estimates based on service responses plus the DEM
+raster windows SCO LIDEX asks GDAL to read.
+
+The message panel between Exit and Contact reports the active production stage:
+- SCAN COMPLETE
+- TILES - US - HIGH RES
+- TILES - GLOBAL - LOW RES
+- TILES - DISTANT MOUNTAINS
+- OSM - DOWNLOAD
+- OSM - PROCESSING
+- OSM - MAKING MAPS
+- OPERATION COMPLETE
+
+Interface sounds follow the same production states:
+- SCOpress plays for application button presses.
+- SCOtic plays for checkbox and radio-button selections.
+- SCOclick plays for ordinary message-panel stage changes.
+- SCOchirp plays when Scan or Run completes successfully.
+- SCObuzz plays for failure, error, or abort indications.
+
+Sound playback is centralized so events do not overlap or produce dual sounds.
+Missing or unavailable sound files never interrupt route processing.
+
+While Distant Mountains are processing, the panel remains TILES - DISTANT
+MOUNTAINS. DM source-resolution changes continue to update the counters and log
+without replacing the stage message.
+
+Stages are gated. If normal terrain has any failed tiles, SCO LIDEX finishes the
+terrain batch, prints the retry list, and stops before DM or maps. Fix the error
+or use Append before continuing. If DM has failures, SCO LIDEX finishes the DM
+batch and stops before maps. OSM or map failures stop that stage. A failure or
+abort message remains in the panel instead of being replaced by OPERATION
+COMPLETE.
 
 If the GUI fails before opening, SCO LIDEX writes a separate
 SCOLIDEX-startup-error.txt file on the user's Desktop.
@@ -218,8 +325,8 @@ If the log prints an "Unmappable failed tiles" block, those tile names are not
 paste-ready retries. SCO LIDEX could not match them to ORTS world tile
 coordinates.
 
-12. Reporting tester issues
---------------------------
+13. Reporting tester issues
+---------------------------
 When reporting a problem, include:
 - SCO LIDEX version number shown in the GUI.
 - The route name.

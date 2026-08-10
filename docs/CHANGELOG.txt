@@ -1,6 +1,77 @@
 SCO LIDEX Changelog
 ===================
 
+v1.200
+------
+- Added immediate SCANNING status and a one-second working indicator that cycles
+  active statuses through zero, one, two, and three real bullets on each side.
+  Completion, failure, error, abort, and ready states remain fixed.
+- Create Map Tiles writes directly to TSRE's F3
+  `terrain_maps/<X*10000+Y>.png` overlay cache. Matching PNGs are overwritten;
+  no map ACE is created and terrain `.t` materials/UVs remain unchanged.
+- Corrected F3 cache naming for the route coordinate convention: TSRE map Y is
+  the negative of terrain Z, so the filename hash is `X*10000-Z` in LIDEX.
+- Added non-overlapping interface audio for button presses, checkbox/radio
+  selections, ordinary status changes, successful Scan/Run completion, and
+  failure/error/abort indications.
+  All supplied WAV assets are retained in source and distribution output.
+- Expanded the center message panel to report Scan, terrain-source, DM, OSM
+  download/processing/rendering, completion, failure, and abort stages using one
+  consistent color. Terrain and DM failures now finish their current batch and
+  gate all later production stages so Append/correction can occur first.
+- Added an isolated experimental 4m normal-terrain test path: KML can create the
+  full route footprint, every normal tile is generated as a 512x512 grid, shared
+  edges/corners are merged, and optional map textures run afterward. DM remains
+  disabled and the established 8m writer is unchanged.
+- Deactivated 4m export after the initial test build while retaining the complete
+  implementation behind one internal feature switch. The GUI now remains fixed
+  to Normal - 8m output.
+- Restored the Route Path Browse button with the Windows folder-selection dialog.
+- Added a clearly labeled Recent menu backed by
+  %LocalAppData%\SCOLIDEX\route-history.json, retaining the five most recent valid route
+  folders and automatically filtering missing or invalid entries.
+- Kept the WinForms entry thread in STA mode so route autocomplete and the
+  Windows folder-selection dialog initialize reliably.
+- Uses a dedicated Recent button instead of a native ComboBox, improving
+  contrast and avoiding re-entrant native drop-down behavior.
+- Enabled Create Map Tiles with anonymous Geofabrik OpenStreetMap regional PBF
+  extracts, resumable local caching, and read-only source/driver Scan checks.
+- Added self-contained 4096x4096 TSRE ACE reference-texture writing without an
+  external editor or MSTS tool.
+- Uses the same corrected terrain projection for every OSM vertex and validates
+  tile corners/center; the Austria acceptance route measured 0.000000 pixels.
+- Added transactional temporary output and timestamped backups for replaced map
+  ACE files.
+- Loads selected-route PBF geometry once, retains it for the complete run, and
+  renders two map textures concurrently without a geometry reload.
+- Replaced the initial dark LIDEX map theme with a direct port of TSRE's OSM
+  vector background, feature colors, road casings/widths, and drawing order.
+- Corrected Geofabrik selection to require one extract that covers every
+  selected terrain tile; multi-state routes now select the broader regional
+  extract instead of the smallest extract containing only the route center.
+- Treats genuinely featureless OSM tiles as valid TSRE background textures
+  instead of aborting the map run.
+- Matched TSRE's OSMFeatures layer priorities so water polygons render above
+  overlapping residential, forest, and other land-use polygons.
+- Preserves the complete OSM node stream while filtering finished geometry,
+  allowing long river, lake, and forest multipolygon relations to remain
+  complete when their remote vertices extend beyond the selected route area.
+- Rebuilds TSRE's normal terrain database index whenever Marker, KML, Track
+  Database, or text-list selection creates route tiles, ensuring newly created
+  .t, _y.raw, and world-file sets appear as editable base terrain in TSRE.
+- Added anonymous Copernicus DEM GLO-30 Public fallback coverage after the
+  existing USGS 1m, 5m~, and 10m sources for normal and Distant Mountain
+  terrain.
+- Added separate 30m (global) status counters, low-resolution mode indicator,
+  source logging, scan validation, and data-read accounting.
+- Increased the window height to accommodate the new status row without
+  reducing the running-log area.
+- Moved Copernicus tile discovery and COG reading into Program.Copernicus.cs.
+- Separated selection, terrain, Distant Mountain, projection, Copernicus, and
+  map generation into major partial-class components without changing the GUI.
+- Moved map-cache size reporting to a unified exit dialog with Keep Cache,
+  Purge Cache, and Cancel Exit choices for both the Exit button and window X.
+
 v1.100
 ------
 - Corrected standard-projection terrain placement by 16 meters east and
