@@ -2183,7 +2183,7 @@ internal sealed partial class TopoForm : Form
         }
 
         Match routeProgress = RouteProgressRegex().Match(line);
-        if (routeProgress.Success)
+        if (routeProgress.Success && createRouteTiles.Checked)
         {
             routeStatus.Total = ParseNumber(routeProgress.Groups["total"].Value);
             routeStatus.Processed = ParseNumber(routeProgress.Groups["generated"].Value);
@@ -2194,7 +2194,7 @@ internal sealed partial class TopoForm : Form
         }
 
         Match done = RouteDoneRegex().Match(line);
-        if (done.Success)
+        if (done.Success && createRouteTiles.Checked)
         {
             routeStatus.Total = ParseNumber(done.Groups["total"].Value);
             routeStatus.Processed = ParseNumber(done.Groups["generated"].Value);
@@ -2205,7 +2205,7 @@ internal sealed partial class TopoForm : Form
         }
 
         Match sourceUseSummary = SourceUseSummaryRegex().Match(line);
-        if (sourceUseSummary.Success)
+        if (sourceUseSummary.Success && createRouteTiles.Checked)
         {
             routeStatus.OneMeter = ParseNumber(sourceUseSummary.Groups["primary"].Value);
             routeStatus.Opr = ParseNumber(sourceUseSummary.Groups["opr"].Value);
@@ -2406,7 +2406,7 @@ internal sealed partial class TopoForm : Form
     [GeneratedRegex(@"\[DM\s+(?<index>[\d,]+)/(?<total>[\d,]+)\]", RegexOptions.IgnoreCase)]
     private static partial Regex DistantMountainTileRegex();
 
-    [GeneratedRegex(@"Prepared TSRE-style lo_tile with 10m=(?<ten>[\d,]+),\s+30m \(global\)=(?<global>[\d,]+),", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"Prepared TSRE-style lo_tile with (?:10m=(?<ten>[\d,]+),\s+)?30m \(global\)=(?<global>[\d,]+),", RegexOptions.IgnoreCase)]
     private static partial Regex DistantMountainPreparedRegex();
 
     [GeneratedRegex(@"Distant Mountains done\.\s+Generated=(?<generated>[\d,]+),\s+skipped=(?<skipped>[\d,]+),\s+failed=(?<failed>[\d,]+),\s+total=(?<total>[\d,]+)", RegexOptions.IgnoreCase)]

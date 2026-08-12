@@ -502,7 +502,7 @@ internal static partial class Program
         SortedSet<string> retryableFailedNormalTileNames = new(StringComparer.OrdinalIgnoreCase);
         SortedSet<string> unmappableFailedNormalTileNames = new(StringComparer.OrdinalIgnoreCase);
         IReadOnlyList<TerrainTile> processingTiles = GetRouteTileProcessingList(route!, markerCoverage, trackDatabaseCoverage, kmlCoverage, textFileCoverage, terrainRadius);
-        int totalTiles = processingTiles.Count;
+        int totalTiles = createRouteTiles ? processingTiles.Count : 0;
 
         if (experimental4mTest)
         {
