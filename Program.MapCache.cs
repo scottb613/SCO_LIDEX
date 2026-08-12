@@ -571,10 +571,7 @@ internal static partial class Program
                 return true;
             }
 
-            string osmDirectory = GetRouteOsmDirectory(entry.RoutePath);
-            bool hasOsmCache = Directory.Exists(osmDirectory) &&
-                Directory.EnumerateFiles(osmDirectory, "*", SearchOption.AllDirectories).Any();
-            return !hasOsmCache;
+            return !TryReadRouteOsmManifest(entry.RoutePath, out _, out _);
         });
         SaveMapCacheRegistry(registry);
     }

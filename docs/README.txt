@@ -45,11 +45,25 @@ v1.200 - What's New
   osm_data\osm-cache.json manifest for discovery and reuse.
 - Downloads a fresh PBF into the selected route only when no covering route
   cache exists. Purging a PBF is the user's explicit refresh mechanism.
+- During Create Map Tiles, writes route OSM derivatives under the active
+  route's osm_data folder: categorized route-geodata.gpkg, its
+  route-geodata.json manifest, and TSRE-compatible forest-polygons.geojson.
+- Uses the union of the route's actual 2048-meter world-tile footprints.
+  Habitat layers use exact route coverage; transport, water, building, and
+  developed-context layers retain a 2048-meter margin.
+- Stores indexed WGS84 layers for woodland, scrub, heath, grassland, wetland,
+  water, waterways, buildings, developed land, agriculture, roads, railways,
+  and bare ground.
+- Rebuilds derivatives when the PBF or route world-tile fingerprint changes.
+  A fresh PBF download always refreshes them; a current package is reused.
+- Reads a covering PBF from another route in place and saves the sliced
+  derivatives under the active route. Validated outputs atomically replace the
+  previous derivative set.
 - Keeps only the small Geofabrik index and cross-route cache registry under
   %LocalAppData%\SCOLIDEX; large PBF data is never stored in AppData.
-- Lists regional PBFs and partial downloads separately on exit. Purge boxes are
-  unchecked by default. The small shared Geofabrik index and generated
-  terrain_maps PNG files are never offered for deletion.
+- Lists only regional PBFs and partial downloads on exit. Purge boxes are
+  unchecked by default. Route derivatives, the small shared Geofabrik index,
+  and generated terrain_maps PNG files are never offered for deletion.
 - Creates a 4096x4096 TSRE F3 overlay PNG per selected normal tile in
   terrain_maps using TSRE's X*10000+Y naming convention.
 - Overwrites a matching cached PNG directly while leaving terrain .t materials,

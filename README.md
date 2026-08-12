@@ -82,8 +82,13 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 - Searches OSM caches before downloading: the selected route first, then sibling and registered route caches. A covering cache is used directly in place without copying it.
 - Downloads a fresh Geofabrik PBF into the selected route only when no existing route cache covers the selection. Purging a cached PBF is the user's explicit refresh mechanism.
 - Stores each new Geofabrik PBF under its route's `osm_data\geofabrik` folder and writes a portable `osm_data\osm-cache.json` manifest.
+- During **Create Map Tiles**, writes reusable route OSM derivatives to the active route's `osm_data` folder: categorized `route-geodata.gpkg`, its `route-geodata.json` manifest, and TSRE-compatible `forest-polygons.geojson`.
+- Builds derivative coverage from the union of the route's actual 2048-meter world-tile footprints. Habitat layers are clipped to the exact route coverage; roads, railways, water, buildings, and developed context retain a 2048-meter margin.
+- Stores woodland, scrub, heath, grassland, wetland, water, waterways, buildings, developed land, agriculture, roads, railways, and bare-ground layers with declared WGS84 coordinates and spatial indexes.
+- Rebuilds derivatives when the regional PBF or route world-tile fingerprint changes. A newly downloaded PBF always refreshes the derivatives; an unchanged current package is reused.
+- Reads a covering PBF from another route in place while saving the newly sliced derivatives under the active route. Derivatives are validated and atomically replace the previous set only after all outputs pass validation.
 - Keeps only the small shared Geofabrik index and cross-route cache registry under `%LocalAppData%\SCOLIDEX`; large PBF data is never stored in AppData.
-- Replaces the all-or-nothing exit purge with an unchecked, per-cache list covering regional PBFs and incomplete downloads. The small shared Geofabrik index and generated TSRE map PNGs are never offered for deletion.
+- Replaces the all-or-nothing exit purge with an unchecked, per-cache list covering only regional PBFs and incomplete downloads. Route derivatives, the small shared Geofabrik index, and generated TSRE map PNGs are never offered for deletion.
 - Refines the standard-projection baseline to 11 meters east and 16 meters south.
 - Isolates Copernicus naming, discovery, validation, and COG reads in `Program.Copernicus.cs`.
 - Enables **Create Map Tiles** using anonymous Geofabrik regional OpenStreetMap PBF extracts rather than the public OSM editing API.
@@ -108,7 +113,7 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 - Internet access while requesting elevation or Geofabrik map data.
 - USGS elevation coverage is United States focused.
 - Large routes can require substantial processing time and disk space.
-- Map overlays are compressed 4096×4096 PNG files in the route's `terrain_maps` folder and are never deleted by SCO LIDEX cache cleanup. Regional PBF data is kept under the route's `osm_data` folder. On exit, SCO LIDEX lists known OSM data caches and allows only individually checked caches to be purged.
+- Map overlays are compressed 4096×4096 PNG files in the route's `terrain_maps` folder. Route OSM derivatives remain under `osm_data`; regional PBF bulk data remains under `osm_data\geofabrik`. On exit, SCO LIDEX offers only individually checked PBF and partial-download files for purge. Map PNGs and route derivatives are retained.
 - Clean Tile Wipe and post-processing terrain shifts modify route files; always work from a backup.
 - KML polygon filling is basic and should be considered experimental.
 - SCO LIDEX reads `TsreGeoProjection` when present but does not create or modify that route setting.

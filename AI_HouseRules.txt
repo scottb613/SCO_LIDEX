@@ -97,6 +97,18 @@ AI House Rules
 - Do not commit, push, tag, merge, or publish a GitHub release unless the user
   explicitly requests the corresponding action.
 
+Testing Runtime Updates
+=======================
+
+- After a verified code change, replace the local testing runtime targeted by
+  the SCO LIDEX desktop shortcut so the user can immediately evaluate it.
+- A testing-runtime replacement is not a formal Push Local. It updates only the
+  clean published runtime and does not update documentation, version files, the
+  release ZIP, Git branches, tags, or GitHub.
+- Update documentation and rebuild the complete local package/ZIP only when the
+  user explicitly requests Push Local or otherwise requests a formal local
+  package update.
+
 Version and Tag Rules
 =====================
 

@@ -12,6 +12,20 @@ v1.200
 - Added route-cache-first OSM discovery. LIDEX checks the selected route first,
   then sibling and registered route caches, and uses a covering PBF directly
   from its existing location without copying it.
+- Added route-local OSM derivative output during Create Map Tiles:
+  osm_data\route-geodata.gpkg, osm_data\route-geodata.json, and the TSRE
+  compatibility file osm_data\forest-polygons.geojson.
+- Added indexed WGS84 GeoPackage layers for woodland, scrub, heath, grassland,
+  wetland, water, waterways, buildings, developed land, agriculture, roads,
+  railways, and bare ground. Habitat geometry uses exact world-tile coverage;
+  transport, water, building, and developed context retain a 2048m margin.
+- Added PBF and world-tile fingerprint freshness checks. Fresh downloads force
+  derivative regeneration; unchanged current packages are reused. A PBF reused
+  from another route remains in place while derivatives are saved to the active
+  route.
+- Added validation and atomic three-file promotion for route derivatives.
+  Invalid source geometry is repaired when possible and repair/skip totals are
+  recorded in route-geodata.json.
 - Removed large AppData PBF/partial-download storage and migration. A fresh PBF
   is downloaded into the selected route only when no covering route cache
   exists; purging the cached PBF is the explicit refresh operation.
@@ -42,7 +56,7 @@ v1.200
   caches while keeping the route manifest authoritative.
 - Replaced whole-cache exit deletion with unchecked per-cache selections for
   regional extracts and incomplete downloads. The small shared Geofabrik index
-  remains internal application data and is never offered for deletion.
+  and route derivative files remain in place and are never offered for deletion.
 - Purge Selected with no checked cache now plays the failure buzz, deletes
   nothing, and keeps the exit dialog open.
 - Classified generated terrain_maps PNG files as permanent route output; cache

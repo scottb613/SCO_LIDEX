@@ -84,6 +84,49 @@ Create Map Tiles:
   route-local PBF. Existing caches are accepted as the user's chosen data;
   purge a PBF before running when a fresh download is wanted.
 
+  Route OSM derivative output:
+
+  During Create Map Tiles, SCO LIDEX also creates or updates these files under
+  the active route:
+
+  <Route>\osm_data\route-geodata.gpkg
+  <Route>\osm_data\route-geodata.json
+  <Route>\osm_data\forest-polygons.geojson
+
+  route-geodata.gpkg is a WGS84 GeoPackage with spatial indexes. It contains
+  separate source-geometry layers for woodland, scrub, heath, grassland,
+  wetland, water polygons, waterways, buildings, developed land, agriculture,
+  roads, railways, and bare ground. Original road, railway, and waterway lines
+  remain lines; their clearance widths are not permanently applied to these
+  source layers.
+
+  route-geodata.json records the source PBF relative path, byte size,
+  modification time, SHA-256, route world-tile count and fingerprint,
+  2048-meter context margin, coordinate system, feature count per layer, and
+  geometry repair/skip diagnostics.
+
+  forest-polygons.geojson is the schemaVersion 1 TSRE compatibility product.
+  It contains woodland clipped to exact route world-tile coverage after the
+  current road, railway, water, building, developed-land, agriculture, and
+  bare-ground exclusion masks are applied. Polygon, multipolygon, and inner
+  ring geometry is retained with original, plantable, and excluded area values.
+
+  Exact coverage is the union of the route's actual 2048-meter world-tile
+  footprints. Habitat and planting layers are clipped to exact coverage.
+  Transport, water, building, and developed-context layers retain a
+  2048-meter margin around that coverage.
+
+  A covering PBF may remain in another route's cache and is read directly from
+  that location. The three derivative files are always saved under the active
+  route. SCO LIDEX rebuilds them when the source PBF identity or route
+  world-tile fingerprint changes. A newly downloaded PBF always triggers a
+  rebuild. If the source and route coverage are unchanged, the current
+  derivatives are reused.
+
+  All three new files are written and validated as temporary outputs before
+  they atomically replace the previous derivative set. A failed or aborted
+  rebuild leaves the previous validated set in place.
+
   The small shared Geofabrik index remains under
   %LocalAppData%\SCOLIDEX\map-data. A
   %LocalAppData%\SCOLIDEX\cache-registry-v1.json registry records known route
@@ -94,9 +137,10 @@ Create Map Tiles:
   On exit, SCO LIDEX lists every known purgeable OSM data cache separately:
   regional PBFs and incomplete downloads. Every purge checkbox is clear by
   default. The small shared Geofabrik index is internal application data and is
-  never offered for deletion. Select only the OSM caches to remove, then choose
-  Purge Selected; Keep All leaves every cache untouched, and Cancel Exit
-  returns to the application.
+  never offered for deletion. route-geodata.gpkg, route-geodata.json, and
+  forest-polygons.geojson are route output and are never offered for deletion.
+  Select only the OSM caches to remove, then choose Purge Selected; Keep All
+  leaves every cache untouched, and Cancel Exit returns to the application.
 
   Purge Selected remains available when nothing is checked. In that case it
   plays the failure buzz, deletes nothing, and keeps the exit dialog open.

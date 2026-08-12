@@ -50,6 +50,7 @@ internal static partial class Program
     }
 
     private sealed record MapSourceAvailability(bool CanRun, bool CacheOnly, bool HasWarning, string Detail);
+    private sealed record GeofabrikExtract(string Path, bool Downloaded);
 
     private static async Task RunMapTileProbeAsync(string[] args, CancellationToken cancellationToken)
     {
@@ -77,7 +78,7 @@ internal static partial class Program
             throw new InvalidOperationException("selected terrain tiles produce duplicate TSRE F3 map-cache names");
         }
         Console.WriteLine($"Map output probe: PASSED for {tiles.Count:N0} TSRE F3 terrain_maps PNG file(s); terrain materials and UVs will remain unchanged.");
-        MapSourceAvailability source = await ScanMapTileSourceAsync(route.RouteDir, mapper, tiles, cancellationToken);
+        MapSourceAvailability source = await ScanMapTileSourceAsync(route, mapper, tiles, cancellationToken);
         if (!source.CanRun)
         {
             throw new InvalidOperationException(source.Detail);
@@ -85,7 +86,7 @@ internal static partial class Program
     }
 
     private static async Task<MapSourceAvailability> ScanMapTileSourceAsync(
-        string routeDir,
+        RouteLayout route,
         GeoTileMapper mapper,
         IReadOnlyList<TerrainTile> selectedTiles,
         CancellationToken cancellationToken)
@@ -100,8 +101,8 @@ internal static partial class Program
             }
 
             using HttpClient client = CreateMapHttpClient(TimeSpan.FromSeconds(45));
-            IReadOnlyList<(double Lon, double Lat)> coveragePoints = GetMapCoveragePoints(mapper, selectedTiles);
-            GeofabrikResolution resolution = await ResolveGeofabrikRegionAsync(client, routeDir, mapper, coveragePoints, cacheOnly: false, cancellationToken);
+            IReadOnlyList<(double Lon, double Lat)> coveragePoints = GetMapAndRouteCoveragePoints(mapper, selectedTiles, route.WorldTiles);
+            GeofabrikResolution resolution = await ResolveGeofabrikRegionAsync(client, route.RouteDir, mapper, coveragePoints, cacheOnly: false, cancellationToken);
             GeofabrikRegion region = resolution.Region;
             Console.WriteLine("Map tiles: enabled; 4096x4096 image per normal 2048 m terrain tile.");
             Console.WriteLine($"Map source: Geofabrik {region.Name} ({region.Id}), anonymous regional OpenStreetMap PBF.");
@@ -176,20 +177,21 @@ internal static partial class Program
         }
 
         using HttpClient client = CreateMapHttpClient(Timeout.InfiniteTimeSpan);
-        IReadOnlyList<(double Lon, double Lat)> coveragePoints = GetMapCoveragePoints(mapper, tiles);
+        IReadOnlyList<(double Lon, double Lat)> coveragePoints = GetMapAndRouteCoveragePoints(mapper, tiles, route.WorldTiles);
         GeofabrikResolution resolution = await ResolveGeofabrikRegionAsync(client, route.RouteDir, mapper, coveragePoints, cacheOnly, cancellationToken);
         if (!resolution.CanRun)
         {
             throw new InvalidOperationException($"Geofabrik map source is unavailable and no usable cached extract exists: {resolution.Detail}");
         }
         GeofabrikRegion region = resolution.Region;
-        string pbfPath = await EnsureGeofabrikExtractAsync(
+        GeofabrikExtract extract = await EnsureGeofabrikExtractAsync(
             client,
             route.RouteDir,
             region,
             resolution.CachedExtractPath,
             cacheOnly || resolution.CacheOnly,
             cancellationToken);
+        string pbfPath = extract.Path;
         string terrainMapsDir = Path.Combine(route.RouteDir, "terrain_maps");
         Directory.CreateDirectory(terrainMapsDir);
 
@@ -201,7 +203,14 @@ internal static partial class Program
         int started = 0;
         using GdalDataset dataSource = Gdal.OpenEx(pbfPath, (uint)(GdalConst.OF_VECTOR | GdalConst.OF_READONLY), null, null, null)
             ?? throw new InvalidOperationException("GDAL could not open the Geofabrik .osm.pbf extract");
-        List<OsmPrimitive> mapGeometry = LoadOsmGeometry(dataSource, mapper, tiles, cancellationToken);
+        List<OsmPrimitive> mapGeometry = LoadOsmGeometry(
+            dataSource,
+            route,
+            mapper,
+            tiles,
+            pbfPath,
+            extract.Downloaded,
+            cancellationToken);
         long pointCount = mapGeometry.Sum(p => (long)p.Points.Length);
         long estimatedBytes = (pointCount * 16L) + (mapGeometry.Count * 96L);
         Console.WriteLine($"OSM geometry retained for the complete run: {tiles.Count:N0} tile(s), {mapGeometry.Count:N0} geometry part(s), {pointCount:N0} points, estimated geometry memory {FormatByteCount(estimatedBytes)}.");
@@ -483,6 +492,24 @@ internal static partial class Program
         return points;
     }
 
+    private static IReadOnlyList<(double Lon, double Lat)> GetMapAndRouteCoveragePoints(
+        GeoTileMapper mapper,
+        IReadOnlyList<TerrainTile> mapTiles,
+        IReadOnlyList<WorldTile> routeWorldTiles)
+    {
+        List<(double Lon, double Lat)> points = [.. GetMapCoveragePoints(mapper, mapTiles)];
+        foreach (WorldTile worldTile in routeWorldTiles.DistinctBy(tile => (tile.X, tile.Z)))
+        {
+            (double minLon, double minLat, double maxLon, double maxLat) = mapper.GetBoundingBox(worldTile);
+            points.Add((minLon, minLat));
+            points.Add((minLon, maxLat));
+            points.Add((maxLon, minLat));
+            points.Add((maxLon, maxLat));
+            points.Add(((minLon + maxLon) / 2.0, (minLat + maxLat) / 2.0));
+        }
+        return points;
+    }
+
     private static (double MinLon, double MinLat, double MaxLon, double MaxLat) GetJsonGeometryEnvelope(JsonElement geometry)
     {
         double minLon = double.PositiveInfinity;
@@ -562,7 +589,7 @@ internal static partial class Program
         return inside;
     }
 
-    private static async Task<string> EnsureGeofabrikExtractAsync(
+    private static async Task<GeofabrikExtract> EnsureGeofabrikExtractAsync(
         HttpClient client,
         string routeDir,
         GeofabrikRegion region,
@@ -577,7 +604,7 @@ internal static partial class Program
             Console.WriteLine(currentRouteCache
                 ? "Using current route Geofabrik extract."
                 : $"Using existing Geofabrik extract in place: {preferredCachedPath}");
-            return preferredCachedPath;
+            return new GeofabrikExtract(preferredCachedPath, false);
         }
 
         // A route-local file has priority even if a caller did not resolve a
@@ -586,7 +613,7 @@ internal static partial class Program
         if (IsUsableCacheFile(routePath))
         {
             Console.WriteLine("Using current route Geofabrik extract.");
-            return routePath;
+            return new GeofabrikExtract(routePath, false);
         }
 
         if (cacheOnly)
@@ -642,7 +669,7 @@ internal static partial class Program
         File.Move(partialPath, finalPath, overwrite: true);
         WriteRouteOsmManifest(routeDir, region, finalPath);
         Console.WriteLine($"Saved route-local OSM cache: {finalPath}");
-        return finalPath;
+        return new GeofabrikExtract(finalPath, true);
     }
 
     private static Bitmap RenderMapBitmap(IReadOnlyList<OsmPrimitive> primitives, GeoTileMapper mapper, WorldTile tile, CancellationToken cancellationToken, out int renderedParts)
@@ -687,8 +714,11 @@ internal static partial class Program
 
     private static List<OsmPrimitive> LoadOsmGeometry(
         GdalDataset dataSource,
+        RouteLayout route,
         GeoTileMapper mapper,
         IReadOnlyList<TerrainTile> tiles,
+        string pbfPath,
+        bool forceRouteDerivativeRefresh,
         CancellationToken cancellationToken)
     {
         double minLon = double.PositiveInfinity;
@@ -702,6 +732,19 @@ internal static partial class Program
             minLat = Math.Min(minLat, tileMinLat);
             maxLon = Math.Max(maxLon, tileMaxLon);
             maxLat = Math.Max(maxLat, tileMaxLat);
+        }
+        using RouteForestDerivativeBuilder? geodataBuilder = RouteForestDerivativeBuilder.TryCreate(
+            route,
+            mapper,
+            pbfPath,
+            forceRouteDerivativeRefresh,
+            cancellationToken);
+        if (geodataBuilder is not null)
+        {
+            minLon = Math.Min(minLon, geodataBuilder.MinLongitude);
+            minLat = Math.Min(minLat, geodataBuilder.MinLatitude);
+            maxLon = Math.Max(maxLon, geodataBuilder.MaxLongitude);
+            maxLat = Math.Max(maxLat, geodataBuilder.MaxLatitude);
         }
         double padLon = (maxLon - minLon) * 0.01;
         double padLat = (maxLat - minLat) * 0.01;
@@ -732,8 +775,10 @@ internal static partial class Program
             if (feature is null) break;
             using Geometry? geometry = feature.GetGeometryRef();
             if (geometry is null) continue;
+            geodataBuilder?.Collect(feature, geometry);
             CollectOsmGeometry(geometry, GetOsmStyle(feature), primitives);
         }
+        geodataBuilder?.WriteAndPromote();
         primitives.Sort((left, right) => left.Style.DrawOrder.CompareTo(right.Style.DrawOrder));
         return primitives;
     }

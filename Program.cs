@@ -182,6 +182,12 @@ internal static partial class Program
             return;
         }
 
+        if (args.Contains("--route-osm-lifecycle-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunRouteOsmLifecycleProbe();
+            return;
+        }
+
         await RunConsoleAsync(args, CancellationToken.None);
     }
 
@@ -1076,7 +1082,7 @@ internal static partial class Program
                         throw new InvalidOperationException("selection has no geographically positioned normal terrain tile");
                     }
                     ValidateMapProjectionAlignment(mapper, mapTile.WorldTile!);
-                    mapSource = await ScanMapTileSourceAsync(route!.RouteDir, mapper, processingTiles, cancellationToken);
+                    mapSource = await ScanMapTileSourceAsync(route!, mapper, processingTiles, cancellationToken);
                     hasWarnings |= mapSource.HasWarning || !mapSource.CanRun;
                 }
                 catch (Exception ex)
