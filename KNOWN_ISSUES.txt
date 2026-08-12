@@ -1,14 +1,15 @@
 SCO LIDEX Known Issues
 ======================
 
-- Experimental 4m export is deactivated. Its GUI control remains disabled and
-  normal builds produce only the supported 8m terrain format. The test mechanism
-  remains in source pending renewed Open Rails format work.
+- Testing - 4 m remains disabled in the packaged GUI and Normal - 8 m stays
+  selected. The evaluation mechanism remains in source for coordinated Open
+  Rails format testing.
 
 - USGS services may occasionally time out or fail for specific areas. Retry
   later or use the failed-tile list with Use Text File + Append.
 
-- Routes outside USGS elevation coverage will not build useful terrain.
+- Routes outside USGS coverage use Copernicus GLO-30. This is a 30m Digital
+  Surface Model and cannot reproduce the detail of USGS 1m/5m/10m sources.
 
 - Clean Tile Wipe is destructive. It may remove tile-specific texture, water,
   overlay, or other TSRE edits.
@@ -17,6 +18,12 @@ SCO LIDEX Known Issues
   full polygon fill should be considered experimental.
 
 - Distant mountain appearance may vary between TSRE and Open Rails views.
+
+- Distant Mountains always use Copernicus GLO-30 resampled to the 128m
+  low-terrain grid. Missing Copernicus tiles can leave a DM tile unavailable.
+
+- Create Mosaic Tiles is a disabled visual teaser and has no implementation in
+  this build.
 
 - Existing DEMEX-style distant mountain tiles are replaced during Run when
   Create DM Tiles is selected.

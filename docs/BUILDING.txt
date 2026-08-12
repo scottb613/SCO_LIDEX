@@ -16,13 +16,17 @@ Read-only Copernicus source probe:
   dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --copernicus-probe --latitude 51.5007 --longitude -0.1246
 
 Publish self-contained Win x64:
-  dotnet publish SCOLIDEX.csproj -c Release -r win-x64 --self-contained true -o dist\SCOLIDEX-win-x64
+  Publish to a clean staging folder, verify it, then promote the complete output
+  to dist\SCOLIDEX\SCOLIDEX-win-x64. Do not mix files from older publishes.
+
+  dotnet publish SCOLIDEX.csproj -c Release -r win-x64 --self-contained true -o <clean-staging-folder>
 
 Experimental 4m source status:
   Program.Experimental4m.cs and its supporting 512-grid/seam mechanisms remain
-  compiled, but Program.Experimental4mExportEnabled is false. Leave this switch
-  false for normal builds. Re-enabling it requires a deliberate Open Rails test
-  build and renewed format validation.
+  compiled for evaluation. The packaged GUI deliberately keeps both Terrain
+  Output radio buttons disabled with Normal - 8 m selected. Testing - 4 m is
+  not a supported selectable release output; use it only in a deliberate Open
+  Rails test workflow.
 
 Distribution layout:
   AddShortcutDesktop.cmd

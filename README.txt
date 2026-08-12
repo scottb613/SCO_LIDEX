@@ -18,14 +18,18 @@ v1.200 - What's New
 - Adds non-overlapping interface sounds for buttons, checkbox/radio selections,
   normal status changes, successful Scan/Run completion, and
   failure/error/abort indications.
-- Retains an isolated Experimental - 4m test mechanism for complete KML terrain
-  footprints, but deactivates its export switch; the GUI remains Normal - 8m.
+- Retains the isolated 4m evaluation mechanism, but keeps the packaged GUI
+  fixed to Normal - 8 m; the disabled teaser is labeled Testing - 4 m.
+- Adds a disabled Create Mosaic Tiles teaser for future development.
+- Adds the full Beast of Burden title graphic and a slightly taller interface
+  without reducing the running log.
 - Restores Route Path browsing and adds a clearly labeled Recent menu saved
   as JSON under the user's local SCOLIDEX application-data folder.
 - Adds key-free Copernicus DEM GLO-30 Public fallback from AWS Open Data.
 - Keeps the USGS 1m, 5m~, and 10m order, then fills only unresolved posts from
   30m (global) data.
-- Supports global fallback for normal and Distant Mountain terrain.
+- Uses Copernicus GLO-30 exclusively for Distant Mountains, resampling the 30m
+  source onto their 128m low-terrain grid. DM-only work does not query USGS.
 - Labels GLO-30 as a low-resolution DSM that can include vegetation,
   buildings, and infrastructure.
 - Adds a 30m (global) status row, low-resolution indicator, Scan validation,
@@ -33,15 +37,16 @@ v1.200 - What's New
 - Reports USGS 1m, 5m~, 10m, Copernicus, and Geofabrik status separately at the
   end of Scan. Viable fallbacks enable Run with warnings; failed or uncovered
   sources are not polled during that Run.
-- Uses cached Geofabrik index/PBF data for maps during an outage when available;
-  otherwise only maps are skipped while viable terrain/DM work continues.
+- Searches the selected route cache first, then sibling and registered route
+  caches. A covering PBF is used directly in place without copying it.
 - Enables Create Map Tiles from anonymous Geofabrik OpenStreetMap regional PBF
   extracts, with resumable route-local caching and no public OSM API bulk use.
 - Stores the regional PBF under osm_data\geofabrik in the route and writes an
   osm_data\osm-cache.json manifest for discovery and reuse.
-- Migrates a matching legacy AppData PBF into the route without redownloading.
-- Keeps the small Geofabrik index and cross-route cache registry under
-  %LocalAppData%\SCOLIDEX.
+- Downloads a fresh PBF into the selected route only when no covering route
+  cache exists. Purging a PBF is the user's explicit refresh mechanism.
+- Keeps only the small Geofabrik index and cross-route cache registry under
+  %LocalAppData%\SCOLIDEX; large PBF data is never stored in AppData.
 - Lists regional PBFs and partial downloads separately on exit. Purge boxes are
   unchecked by default. The small shared Geofabrik index and generated
   terrain_maps PNG files are never offered for deletion.
@@ -81,7 +86,8 @@ Coverage and tile selection:
 
 Normal and Distant Mountain terrain:
 - Creates or updates normal route terrain in Append or Overwrite mode.
-- Creates TSRE-style Distant Mountain lo_tiles from 10-meter elevation data.
+- Creates TSRE-style Distant Mountain lo_tiles exclusively from Copernicus
+  GLO-30, resampled onto the 128-meter low-terrain grid.
 - Detects and replaces incompatible DEMEX-style distant mountain terrain when
   Distant Mountain generation is selected.
 - Preserves existing texture, water, overlay, and patch choices during normal
@@ -104,21 +110,22 @@ Projection, placement, and calibration:
 
 Safety, validation, and recovery:
 - Performs a read-only Scan before Run and validates route paths, selected
-  tiles, raw-grid readability, decoded coordinates, templates, and a
-  representative USGS service request.
+  tiles, raw-grid readability, decoded coordinates, templates, and only the
+  data sources needed by the selected production stages.
 - Provides Scan Override for deliberate advanced or known-good workflows.
 - Marks retryable failures so Append can retry them automatically.
 - Prints paste-ready failed-tile lists for targeted SCOLIDEXTiles.txt retries
   and separates unmappable failures that cannot be retried by tile name.
-- Provides live totals for processed, skipped, failed, 1m, 5m~, and 10m work.
+- Provides live totals for processed, skipped, failed, 1m, 5m~, 10m, and
+  30m-global work.
 - Supports Abort and stops before the next tile or write step.
 
 Application and diagnostics:
 - Provides a Windows WinForms interface with a formatted, read-only Help viewer.
 - Prevents multiple GUI instances from running simultaneously.
 - Writes SCOLIDEX.log to the user's Desktop with selected settings, projection
-  details, source usage, elapsed time, failures, and an estimated USGS data-read
-  total.
+  details, source usage, elapsed time, failures, and separate USGS/Copernicus
+  data-read totals.
 - Writes SCOLIDEX-startup-error.txt to the Desktop if startup fails before the
   GUI opens.
 - Ships as a self-contained Windows x64 distribution with GDAL, clean terrain
@@ -127,9 +134,9 @@ Application and diagnostics:
 v1.100 - Additional work
 ------------------------
 
-- Corrects standard-projection terrain placement by 16 meters east and
-  16 meters south to match the TSRE map-coordinate convention confirmed across
-  multiple test routes.
+- Uses the calibrated standard-projection terrain baseline of 11 meters east
+  and 16 meters south. v1.100 introduced the correction; v1.200 refines its
+  east/west component.
 - Applies the correction at geographic sampling time to both normal terrain and
   Distant Mountain generation, preserving consistent tile transitions.
 - Leaves route-specific TsreGeoProjection mapping unchanged; the correction is

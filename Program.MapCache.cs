@@ -24,8 +24,6 @@ internal static partial class Program
 
     internal enum MapCacheKind
     {
-        LegacyRegionalExtract,
-        LegacyPartialDownload,
         RouteRegionalExtract,
         RoutePartialDownload,
     }
@@ -57,6 +55,11 @@ internal static partial class Program
         double MaxLatitude,
         string CreatedByVersion);
 
+    private sealed record ReusableOsmCache(
+        string RoutePath,
+        OsmCacheManifest Manifest,
+        string PbfPath);
+
     private sealed record OsmCacheRegistry(int SchemaVersion, List<OsmCacheRegistryEntry> Routes);
 
     private sealed record OsmCacheRegistryEntry(
@@ -87,9 +90,6 @@ internal static partial class Program
 
     private static string GetRouteGeofabrikExtractPath(string routeDir, string regionId) =>
         Path.Combine(GetRouteOsmProviderDirectory(routeDir), GetSafeRegionFileName(regionId) + ".osm.pbf");
-
-    private static string GetLegacyGeofabrikExtractPath(string regionId) =>
-        Path.Combine(GetMapCacheDirectory(), GetSafeRegionFileName(regionId) + ".osm.pbf");
 
     private static string GetSafeRegionFileName(string regionId) =>
         System.Text.RegularExpressions.Regex.Replace(regionId, "[^a-zA-Z0-9._-]", "-");
@@ -155,6 +155,83 @@ internal static partial class Program
             pbfPath = null;
             return false;
         }
+    }
+
+    private static IReadOnlyList<string> GetRouteCacheSearchOrder(string routeDir)
+    {
+        List<string> routePaths = [];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            try
+            {
+                string fullPath = Path.GetFullPath(path)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (Directory.Exists(fullPath) && seen.Add(fullPath))
+                {
+                    routePaths.Add(fullPath);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+            {
+                // A stale registry entry must not prevent the remaining caches
+                // from being considered.
+            }
+        }
+
+        // The selected route always wins, even when another cache contains the
+        // same Geofabrik region.
+        Add(routeDir);
+
+        try
+        {
+            string? routesRoot = Directory.GetParent(Path.GetFullPath(routeDir))?.FullName;
+            if (routesRoot is not null && Directory.Exists(routesRoot))
+            {
+                foreach (string sibling in Directory.EnumerateDirectories(routesRoot)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                {
+                    Add(sibling);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+        {
+            // Registered caches can still be searched if sibling discovery is
+            // unavailable on this route volume.
+        }
+
+        foreach (OsmCacheRegistryEntry entry in LoadMapCacheRegistry().Routes
+            .OrderBy(entry => entry.RoutePath, StringComparer.OrdinalIgnoreCase))
+        {
+            Add(entry.RoutePath);
+        }
+
+        return routePaths;
+    }
+
+    private static ReusableOsmCache? FindReusableRouteOsmCache(
+        string routeDir,
+        Func<OsmCacheManifest, bool> coversSelection)
+    {
+        foreach (string candidateRoute in GetRouteCacheSearchOrder(routeDir))
+        {
+            if (TryReadRouteOsmManifest(candidateRoute, out OsmCacheManifest? manifest, out string? pbfPath) &&
+                manifest is not null &&
+                pbfPath is not null &&
+                coversSelection(manifest))
+            {
+                return new ReusableOsmCache(candidateRoute, manifest, pbfPath);
+            }
+        }
+
+        return null;
     }
 
     private static void WriteRouteOsmManifest(string routeDir, GeofabrikRegion region, string pbfPath)
@@ -255,48 +332,20 @@ internal static partial class Program
     internal static IReadOnlyList<MapCacheEntry> GetKnownMapCaches(string? currentRoutePath)
     {
         List<MapCacheEntry> entries = [];
-        string appDataCache = GetMapCacheDirectory();
-
-        if (Directory.Exists(appDataCache))
-        {
-            foreach (string pbfPath in Directory.EnumerateFiles(appDataCache, "*.osm.pbf", SearchOption.TopDirectoryOnly))
-            {
-                AddSingleFileCache(
-                    entries,
-                    "legacy-pbf:" + Path.GetFullPath(pbfPath).ToUpperInvariant(),
-                    "Legacy regional OSM extract",
-                    Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(pbfPath)),
-                    pbfPath,
-                    MapCacheKind.LegacyRegionalExtract,
-                    appDataCache);
-            }
-
-            foreach (string partialPath in Directory.EnumerateFiles(appDataCache, "*.osm.pbf.part", SearchOption.TopDirectoryOnly))
-            {
-                AddSingleFileCache(
-                    entries,
-                    "legacy-part:" + Path.GetFullPath(partialPath).ToUpperInvariant(),
-                    "Incomplete legacy OSM download",
-                    Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(partialPath))),
-                    partialPath,
-                    MapCacheKind.LegacyPartialDownload,
-                    appDataCache);
-            }
-        }
-
-        OsmCacheRegistry registry = LoadMapCacheRegistry();
         HashSet<string> routePaths = new(StringComparer.OrdinalIgnoreCase);
-        foreach (OsmCacheRegistryEntry route in registry.Routes)
+        if (!string.IsNullOrWhiteSpace(currentRoutePath))
         {
-            if (!string.IsNullOrWhiteSpace(route.RoutePath))
-            {
-                routePaths.Add(Path.GetFullPath(route.RoutePath));
-            }
+            routePaths.UnionWith(GetRouteCacheSearchOrder(currentRoutePath));
         }
-
-        if (!string.IsNullOrWhiteSpace(currentRoutePath) && Directory.Exists(currentRoutePath))
+        else
         {
-            routePaths.Add(Path.GetFullPath(currentRoutePath));
+            foreach (OsmCacheRegistryEntry route in LoadMapCacheRegistry().Routes)
+            {
+                if (!string.IsNullOrWhiteSpace(route.RoutePath))
+                {
+                    routePaths.Add(Path.GetFullPath(route.RoutePath));
+                }
+            }
         }
 
         List<OsmCacheRegistryEntry> refreshedRoutes = [];
@@ -464,16 +513,6 @@ internal static partial class Program
 
     private static void EnsureCacheRootIsSafe(MapCacheKind kind, string managedRoot)
     {
-        string expectedAppDataRoot = Path.GetFullPath(GetMapCacheDirectory());
-        if (kind is MapCacheKind.LegacyRegionalExtract or MapCacheKind.LegacyPartialDownload)
-        {
-            if (!string.Equals(managedRoot, expectedAppDataRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException($"refusing to purge an unexpected AppData cache root: {managedRoot}");
-            }
-            return;
-        }
-
         string leaf = Path.GetFileName(managedRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (!string.Equals(leaf, RouteOsmDirectoryName, StringComparison.OrdinalIgnoreCase))
         {
@@ -491,10 +530,10 @@ internal static partial class Program
     {
         return kind switch
         {
-            MapCacheKind.LegacyRegionalExtract or MapCacheKind.RouteRegionalExtract =>
+            MapCacheKind.RouteRegionalExtract =>
                 path.EndsWith(".osm.pbf", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Path.GetFileName(path), RouteOsmManifestFileName, StringComparison.OrdinalIgnoreCase),
-            MapCacheKind.LegacyPartialDownload or MapCacheKind.RoutePartialDownload =>
+            MapCacheKind.RoutePartialDownload =>
                 path.EndsWith(".osm.pbf.part", StringComparison.OrdinalIgnoreCase),
             _ => false,
         };

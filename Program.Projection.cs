@@ -409,11 +409,11 @@ internal static partial class Program
         private const double EarthRadiusMeters = 6_370_997.0;
         private const double LegacyUpperLeftGoodeX = -20_013_965.0;
         private const double LegacyUpperLeftGoodeY = 8_674_008.0;
-        private const double DefaultTerrainPlacementEastMeters = 16.0;
+        private const double DefaultTerrainPlacementEastMeters = 11.0;
         private const double DefaultTerrainPlacementNorthMeters = -16.0;
         // TSRE's map overlay uses a slightly different IGH image origin than
         // the older ORTS WorldLatLon converter. Sampling west/north by the
-        // opposite amount places generated terrain 16 m east and 16 m south.
+        // opposite amount places generated terrain 11 m east and 16 m south.
         private const double UpperLeftGoodeX =
             LegacyUpperLeftGoodeX - DefaultTerrainPlacementEastMeters;
         private const double UpperLeftGoodeY =

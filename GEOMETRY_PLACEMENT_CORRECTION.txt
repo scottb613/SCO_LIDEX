@@ -4,11 +4,13 @@ SCO LIDEX - Default Terrain Geometry Placement Correction
 Observed problem
 ----------------
 Terrain generated on several default-projection routes consistently needed
-to be moved approximately 16 meters east and 16 meters south to line up with
-the TSRE/OpenStreetMap route overlay.
+an east/south correction to line up with the TSRE/OpenStreetMap route overlay.
+The coordinate comparison resolves that correction to approximately 11 meters
+east and exactly 16 meters south.
 
-This was suspicious because normal ORTS terrain posts are separated by 8
-meters. A 16 meter error is exactly two terrain-post intervals.
+The 16-meter north/south error is exactly two normal ORTS terrain-post
+intervals. The east/west correction is not an exact 8-meter post multiple and
+is most accurately applied while sampling the source DEM.
 
 What was checked
 ----------------
@@ -40,15 +42,15 @@ TSRE map converter constants:
 
 After the different tile-index formulas are accounted for, the north/south
 difference is exactly 16 meters. The calculated east/west difference is
-approximately 11 meters, but the visible result on an 8 meter terrain mesh
-consistently resolves best at the next complete post interval: 16 meters.
+approximately 11 meters. SCO LIDEX now keeps that calculated value instead of
+rounding it to a complete 8-meter terrain-post interval.
 
 Implemented correction
 ----------------------
 For routes using the standard MSTS/Open Rails projection, SCO LIDEX now
 applies a built-in terrain placement correction of:
 
-    16 meters east
+    11 meters east
     16 meters south
 
 The correction is applied at geographic sampling time. Every selected normal

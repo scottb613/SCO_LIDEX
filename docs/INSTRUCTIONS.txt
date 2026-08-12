@@ -48,6 +48,9 @@ Create Route Tiles:
 
 Create DM Tiles:
   Builds or updates TSRE-style lo_tiles.
+  Distant Mountains use Copernicus DEM GLO-30 exclusively. The 30m source is
+  resampled onto the 128m low-terrain grid; DM-only Scan and Run do not query
+  USGS 1m, 5m~, or 10m services.
   Existing DEMEX-style distant mountain tiles are incompatible with the TSRE
   style used by SCO LIDEX. If detected during Run, they are purged and rebuilt
   as TSRE-style lo_tiles.
@@ -71,16 +74,22 @@ Create Map Tiles:
   bounds, relative PBF path, and creating version so LIDEX or future route tools
   can validate and reuse the extract.
 
-  A matching legacy PBF under LocalAppData\SCOLIDEX\map-data is copied and
-  verified into the route, then the legacy copy is removed. Interrupted
-  downloads use a .part file beside the final route-local PBF. If the route
-  cache cannot be written, LIDEX retains AppData as a compatibility fallback.
+  Before downloading, LIDEX checks the selected route's cache first. If it
+  does not contain a covering extract, LIDEX checks sibling route folders and
+  every route cache recorded in the registry. A covering PBF is read directly
+  from its existing location without copying it into the selected route.
+
+  If no covering route cache exists, Run downloads a fresh extract into the
+  selected route. Interrupted downloads use a .part file beside the final
+  route-local PBF. Existing caches are accepted as the user's chosen data;
+  purge a PBF before running when a fresh download is wanted.
 
   The small shared Geofabrik index remains under
   %LocalAppData%\SCOLIDEX\map-data. A
   %LocalAppData%\SCOLIDEX\cache-registry-v1.json registry records known route
   cache locations. The route manifest remains authoritative if the registry is
-  lost or rebuilt.
+  lost or rebuilt. Large PBF files and partial downloads are never stored in
+  AppData.
 
   On exit, SCO LIDEX lists every known purgeable OSM data cache separately:
   regional PBFs and incomplete downloads. Every purge checkbox is clear by
@@ -114,7 +123,7 @@ Create Map Tiles:
   time, memory, and disk space.
 
   Every OSM vertex is projected into the exact tile-local meter frame used by
-  terrain sampling, including the standard 16m east/16m south correction or a
+  terrain sampling, including the standard 11m east/16m south correction or a
   route's TsreGeoProjection. No API key, external route editor, or MSTS runtime
   is required; bundled GDAL reads PBF and SCO LIDEX writes the TSRE F3 PNG
   cache using TSRE's naming and projection behavior.
@@ -126,6 +135,10 @@ Create Map Tiles:
   motorway/trunk roads orange-red. The thin bright-red marker line shown by
   TSRE is an editor/KML overlay and is not part of the map texture.
 
+Create Mosaic Tiles:
+  Disabled teaser for future development. It performs no Scan or Run work in
+  this build.
+
 Clean Tile Wipe (Destructive):
   Rebuilds terrain .t files from a clean template. This can repair corrupted
   terrain tiles but may wipe texture, water, overlay, or other tile-specific
@@ -134,15 +147,17 @@ Clean Tile Wipe (Destructive):
   template is available before Run is enabled.
 
 Scan source handling:
-  Scan tests and reports USGS 1m, 5m~, and 10m, Copernicus 30m global, and the
-  Geofabrik map source separately. The final SCAN SOURCE STATUS block preserves
+  Scan tests only sources needed by the selected stages. Normal terrain tests
+  USGS 1m, 5m~, and 10m plus Copernicus 30m global. Distant Mountains test only
+  Copernicus GLO-30. Maps test the applicable route cache and Geofabrik path.
+  The final SCAN SOURCE STATUS block preserves
   FAILED indications and prints the exact Run plan. The Details line clearly
   distinguishes SERVICE UNAVAILABLE from SERVICE ONLINE / NO ROUTE COVERAGE in
   both Scan and the following Run.
 
   Scan can pass with warnings when another source can complete useful selected
-  work. For example, accessible Copernicus coverage enables global normal and
-  Distant Mountain terrain when USGS is unavailable. Failed USGS services and
+  work. For example, accessible Copernicus coverage enables global normal
+  terrain and is the exclusive Distant Mountain source. Failed USGS services and
   sources with no representative coverage are disabled for that Run and are not
   polled again tile by tile.
 
@@ -167,15 +182,15 @@ Normal - 8m:
   Creates the standard Open Rails normal-terrain format using a 256x256 height
   grid with 8m post spacing. This is the supported output for normal route use.
 
-Experimental - 4m:
-  Deactivated in this build. The control remains visible but disabled, and Scan
-  and Run always use Normal - 8m output.
+Testing - 4 m:
+  The packaged GUI control remains visible but disabled. Normal - 8 m stays
+  selected, and GUI Scan and Run use the supported 8m output.
 
   The isolated test mechanism remains in source: 512x512 _y.raw writing, 4m
-  metadata, complete KML-footprint generation, shared edge/corner merging, no
-  DM, all-or-nothing terrain preparation, and optional maps. It can be restored
-  later with the single internal experimental feature switch after joint Open
-  Rails format testing resumes.
+  metadata, selected-footprint generation, shared edge/corner merging,
+  all-or-nothing terrain preparation, and optional DM/maps. It remains an
+  evaluation path for coordinated Open Rails format testing, not a selectable
+  packaged-GUI output.
 
 7. Selection
 ------------
@@ -211,11 +226,12 @@ Tile Radius:
 
 DM Radius:
   Controls distant mountain coverage around the selected source.
-  Distant mountain tiles use 10m / 1/3 arc-second data where available and
-  fall back to 30m (global) Copernicus data outside US coverage.
+  Every distant mountain tile uses 30m (global) Copernicus data, resampled onto
+  the 128m low-terrain post grid.
 
 Global elevation fallback:
-  SCO LIDEX tries USGS 1m, 5m~, and 10m sources first. Posts still lacking
+  For normal terrain, SCO LIDEX tries USGS 1m, 5m~, and 10m sources first.
+  Posts still lacking
   coverage are read anonymously from Copernicus DEM GLO-30 Public on AWS Open
   Data and are counted as 30m (global). This is low-resolution source data even
   though it is resampled onto the normal ORTS 8m post grid.
@@ -235,8 +251,9 @@ SCO LIDEX samples normal route terrain using that true 8m post spacing. This
 avoids stretching the 256 raw posts across the full tile footprint and should
 improve alignment with route/map overlays.
 
-Distant Mountain tiles are much lower resolution and still use their existing
-lo_tile sampling behavior.
+Distant Mountain tiles use a 256x256 grid at approximately 128m post spacing.
+Copernicus GLO-30 is resampled to that existing low-terrain grid; using finer
+USGS data would not increase the stored DM grid resolution.
 
 10. Advanced Geo Bias
 ---------------------
@@ -245,8 +262,8 @@ the route tiles themselves. Positive values move terrain toward N or E, shown
 on the left side of each slider. Leave both at 0 unless you are calibrating a
 route.
 
-For standard-projection routes, v1.100 includes a built-in 16m east and 16m
-south compatibility correction for TSRE map alignment. A slider value of 0
+For standard-projection routes, the calibrated baseline is 11m east and 16m
+south for TSRE map alignment. A slider value of 0
 uses this corrected baseline. Any Advanced Geo Bias value is an additional
 route-specific adjustment.
 
@@ -287,14 +304,14 @@ During Scan and Run, SCO LIDEX checks the .trk file for TsreGeoProjection.
 
 If TsreGeoProjection is not found:
   SCO LIDEX uses the standard MSTS / Open Rails interrupted Goode homolosine
-  world-tile projection with the built-in 16m east and 16m south TSRE map
+  world-tile projection with the built-in 11m east and 16m south TSRE map
   compatibility correction.
 
 If TsreGeoProjection is found:
   SCO LIDEX logs "Alternate projection detection: TsreGeoProjection found" and
   uses the TSRE route-centered projection for DEM sampling, route tile bounding
   boxes, distant mountain sampling, Marker selection, and KML selection. The
-  standard-projection 16m correction is not applied.
+  standard-projection 11m east / 16m south correction is not applied.
 
 The log also records the projection center and calculated meters-per-degree
 values so testers can confirm which projection path was used.

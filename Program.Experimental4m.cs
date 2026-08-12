@@ -17,7 +17,7 @@ internal static partial class Program
     private const double ExperimentalPostSpacingMeters = 4.0;
 
     private static async Task<bool> GenerateExperimental4mTerrainAsync(
-        RouteLayout route,
+        IReadOnlyList<TerrainTile> selectedTiles,
         GeoTileMapper mapper,
         HttpClient httpClient,
         string outputDir,
@@ -26,7 +26,7 @@ internal static partial class Program
         DemSourcePolicy sourcePolicy,
         CancellationToken cancellationToken)
     {
-        List<TerrainTile> tiles = route.TerrainTiles
+        List<TerrainTile> tiles = selectedTiles
             .OrderBy(tile => tile.WorldTile?.Z ?? int.MaxValue)
             .ThenBy(tile => tile.WorldTile?.X ?? int.MaxValue)
             .ToList();
@@ -51,10 +51,9 @@ internal static partial class Program
         Console.WriteLine("=========================================");
         Console.WriteLine(" EXPERIMENTAL 4m NORMAL TERRAIN TEST ");
         Console.WriteLine("=========================================");
-        Console.WriteLine($"Normal terrain tiles: {tiles.Count:N0} (complete route footprint)");
+        Console.WriteLine($"Selected normal terrain tiles: {tiles.Count:N0}");
         Console.WriteLine("Height grid: 512x512, 4m posts, 524,288-byte _y.raw");
-        Console.WriteLine("Distant Mountains: disabled");
-        Console.WriteLine("Write policy: generate every tile first; write nothing if any tile fails.");
+        Console.WriteLine("Write policy: generate every selected tile first; write nothing if any selected tile fails.");
 
         List<ExperimentalGeneratedTile> generated = new(tiles.Count);
         for (int index = 0; index < tiles.Count; index++)
@@ -118,7 +117,7 @@ internal static partial class Program
             Console.WriteLine($"  [write {index + 1:N0}/{generated.Count:N0}] {item.Tile.TileFile.Name}: EXPERIMENTAL 4m OUTPUT");
         }
 
-        Console.WriteLine($"\nEXPERIMENTAL 4m OUTPUT complete: {generated.Count:N0} normal terrain tile(s), no DM tiles.");
+        Console.WriteLine($"\nEXPERIMENTAL 4m OUTPUT complete: {generated.Count:N0} normal terrain tile(s).");
         return true;
     }
 

@@ -115,8 +115,9 @@ Version and Tag Rules
     text
 - Search the complete tracked code/document set for the old version before
   approving a new version.
-- A release tag is immutable. Never move, replace, delete, or reuse an existing
-  public tag unless the user explicitly orders that exceptional action.
+- Release tags may be corrected and repointed when the user explicitly
+  authorizes updating that existing release. Never move, replace, delete, or
+  reuse a public tag silently or without that approval.
 - Create the release tag only after the approved release commit is present on
   remote `master`.
 - Verify that the local tag, remote tag, and remote `master` resolve to the
@@ -204,7 +205,9 @@ Push Git
   body and the single verified ZIP asset.
 - Do not create a release from `work-in-progress`, an agent branch, a stale
   commit, or an unpushed local-only commit.
-- Do not force-push `master`, `work-in-progress`, or a release tag.
+- Do not force-push `master` or `work-in-progress`. Force-update a release tag
+  only when the user explicitly authorizes replacing that existing release,
+  and limit the push to that exact tag reference.
 - After publishing, verify:
   - GitHub default branch is still `master`.
   - GitHub `master` shows the released code and README.
@@ -220,6 +223,10 @@ Release Recovery and Corrections
 
 - If a tag exists but remote `master` is stale, update and verify `master`
   before changing the release. Do not assume the tag alone published the code.
+- When the user authorizes correcting an existing release, repoint only that
+  exact tag after both branches contain the reviewed commit, replace the
+  release asset deliberately, and verify the remote tag, release metadata,
+  asset size, and digest afterward.
 - If a release page is incomplete or incorrectly formatted, correct the release
   body from the approved README without changing the tag target.
 - If the wrong or duplicate release asset was uploaded, remove only the

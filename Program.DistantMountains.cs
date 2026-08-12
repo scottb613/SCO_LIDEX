@@ -26,7 +26,6 @@ internal static partial class Program
 {
     private static async Task<int> GenerateDistantMountainTilesAsync(
         RouteLayout route,
-        HttpClient httpClient,
         string outputDir,
         int loTileRadius,
         double sampleOffsetX,
@@ -41,6 +40,12 @@ internal static partial class Program
         DemSourcePolicy sourcePolicy,
         CancellationToken cancellationToken)
     {
+        if (!sourcePolicy.UseGlobal)
+        {
+            Console.WriteLine("\nDistant Mountains: skipped because Copernicus GLO-30 is unavailable.");
+            return 1;
+        }
+
         if (useMarkerCoverage && route.Markers.Count == 0)
         {
             Console.WriteLine("\nDistant Mountains: skipped because the route has no markers.");
@@ -101,6 +106,7 @@ internal static partial class Program
                         ? "text file"
             : $"{route.TerrainTiles.Count:N0} route tiles";
         Console.WriteLine($"\nDistant Mountains: {coverageDescription}, radius {loTileRadius:N0}, {total:N0} lo_tiles.");
+        Console.WriteLine($"Distant Mountains DEM: {GlobalDemDisplayName} only; 30m source resampled to the 128m low-terrain grid.");
         Console.WriteLine("STATUS: DM - PROCESSING");
         if (sampleOffsetX != 0 || sampleOffsetY != 0)
         {
@@ -155,37 +161,25 @@ internal static partial class Program
                     $"lat {sampleGrid.BoundingBox.MinLat:F6}..{sampleGrid.BoundingBox.MaxLat:F6}");
 
                 List<string> failures = [];
-                DemWindowSearchResult result = sourcePolicy.UseFallback
-                    ? await ReadDemWindowsForDatasetAsync(httpClient, sampleGrid, FallbackDemDataset, failures)
-                    : new DemWindowSearchResult([], ProductSearchFailed: false);
                 short[,] heights = CreateMissingHeightGrid(LoRawGridSize, LoRawGridSize);
-                int samplesUsed = MergeWindows(result.Windows, heights);
-                int missingAfterTenMeter = heights.Cast<short>().Count(h => h == RawMissingHeight);
-                int globalSamplesUsed = 0;
-                if (missingAfterTenMeter > 0 && sourcePolicy.UseGlobal)
-                {
-                    Console.WriteLine(
-                        $"  -> {FallbackDemLabel} coverage left {missingAfterTenMeter:N0} missing DM samples; " +
-                        $"trying {GlobalDemLabel} fallback ({GlobalDemDisplayName}, AWS Open Data, low resolution DSM).");
-                    globalSamplesUsed = MergeWindows(ReadCopernicusDemWindows(sampleGrid, failures), heights);
-                }
+                int globalSamplesUsed = MergeWindows(ReadCopernicusDemWindows(sampleGrid, failures), heights);
 
-                if ((samplesUsed == 0 && globalSamplesUsed == 0) || heights.Cast<short>().All(h => h == RawMissingHeight))
+                if (globalSamplesUsed == 0 || heights.Cast<short>().All(h => h == RawMissingHeight))
                 {
-                    throw new InvalidOperationException("no 10m or 30m global DEM samples were read for this lo_tile. " + string.Join(" | ", failures.Take(6)));
+                    throw new InvalidOperationException("no Copernicus GLO-30 DEM samples were read for this lo_tile. " + string.Join(" | ", failures.Take(6)));
                 }
 
                 int missingBeforeFill = heights.Cast<short>().Count(h => h == RawMissingHeight);
                 if (missingBeforeFill > 0)
                 {
-                    Console.WriteLine($"  -> DEM mosaic still missing {missingBeforeFill:N0} samples after global fallback; filling from neighbors.");
+                    Console.WriteLine($"  -> Copernicus DEM mosaic still missing {missingBeforeFill:N0} samples; filling from neighbors.");
                     FillMissingHeights(heights);
                 }
 
                 FileInfo templateTile = FindLoTileTemplate(outputDir, loName) ?? fallbackTemplateTile;
-                generatedLoTiles.Add(new GeneratedLoTile(loTile, loName, templateTile, tilePath, heightPath, heights, samplesUsed, globalSamplesUsed));
+                generatedLoTiles.Add(new GeneratedLoTile(loTile, loName, templateTile, tilePath, heightPath, heights, 0, globalSamplesUsed));
                 built++;
-                Console.WriteLine($"  -> Prepared TSRE-style lo_tile with 10m={samplesUsed:N0}, {GlobalDemLabel}={globalSamplesUsed:N0}, neighbor-fill={missingBeforeFill:N0} samples.");
+                Console.WriteLine($"  -> Prepared TSRE-style lo_tile with {GlobalDemLabel}={globalSamplesUsed:N0}, neighbor-fill={missingBeforeFill:N0} samples.");
             }
             catch (Exception ex)
             {

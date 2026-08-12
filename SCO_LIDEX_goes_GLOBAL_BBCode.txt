@@ -11,11 +11,11 @@ That answer has changed.
 
 [b]SCO LIDEX v1.200 now provides worldwide terrain-building coverage.[/b]
 
-It still uses the best available high-resolution USGS data for United States routes, but it can now fall back automatically to the public Copernicus GLO-30 global elevation dataset. The same release also builds Distant Mountains and can create detailed OpenStreetMap map tiles without making the user manually hunt down and install map images.
+It still uses the best available high-resolution USGS data for United States routes, but it can now fall back automatically to the public Copernicus GLO-30 global elevation dataset. The same release also builds Distant Mountains and can create detailed OpenStreetMap map tiles without making the user manually download and install map images - one by one.
 
 In plain English - point LIDEX at the route, select what you want, run Scan, and let the program sort out which data sources can do the job.
 
-[b]============================================================[/b]
+
 [b]HIGH-LEVEL FEATURES[/b]
 [b]============================================================[/b]
 
@@ -23,7 +23,7 @@ In plain English - point LIDEX at the route, select what you want, run Scan, and
 [*][b]Worldwide terrain coverage[/b] using the key-free Copernicus DEM GLO-30 Public dataset.
 [*][b]High-resolution U.S. terrain remains intact[/b] using the established USGS source sequence.
 [*][b]Automatic source fallback[/b] uses the best available elevation source and fills unresolved terrain from the next viable source.
-[*][b]Global Distant Mountains[/b] can be generated where USGS 10-meter coverage is not available.
+[*][b]Global Distant Mountains[/b] use Copernicus GLO-30 exclusively, resampled onto the existing 128-meter low-terrain grid.
 [*][b]OpenStreetMap map tiles[/b] are created automatically from anonymous Geofabrik regional extracts.
 [*][b]No manual map downloads[/b] and no separate map-image installation step.
 [*][b]No API keys[/b] for Copernicus, Geofabrik, or USGS public data.
@@ -35,7 +35,7 @@ In plain English - point LIDEX at the route, select what you want, run Scan, and
 [*][b]Selective cache cleanup[/b] lets the user choose individual OSM downloads to remove when exiting LIDEX.
 [/list]
 
-[b]============================================================[/b]
+
 [b]THE ELEVATION SOURCES[/b]
 [b]============================================================[/b]
 
@@ -44,15 +44,17 @@ LIDEX checks the elevation sources in this order:
 [list=1]
 [*][b]USGS 3DEP 1-meter DEM[/b] - the highest-resolution source used by LIDEX for covered United States routes.
 [*][b]USGS Original Product Resolution - shown as 5m~[/b] - used where applicable when 1-meter coverage does not resolve every terrain post.
-[*][b]USGS/NED 1/3 arc-second - shown as 10m[/b] - the established lower-resolution U.S. fallback and Distant Mountain source.
+[*][b]USGS/NED 1/3 arc-second - shown as 10m[/b] - the established lower-resolution U.S. fallback for normal terrain.
 [*][b]Copernicus DEM GLO-30 Public - shown as 30m (global)[/b] - the key-free worldwide fallback supplied through AWS Open Data.
 [/list]
+
+Normal terrain follows that source order. Distant Mountains go directly to Copernicus GLO-30 because their stored grid is already approximately 128 meters per post; DM-only work does not query USGS.
 
 Note: 30-meter global data is not magically the same thing as 1-meter LIDAR. Copernicus GLO-30 is a lower-resolution digital surface model, and its elevations may include vegetation, buildings, and other infrastructure. It gives route builders practical worldwide coverage - it does not pretend every country suddenly has USGS-quality 1-meter terrain.
 
 LIDEX identifies global processing clearly in the interface and log. On a U.S. route, it will still try the finer USGS sources first and use Copernicus only where the selected route needs it.
 
-[b]============================================================[/b]
+
 [b]OPENSTREETMAP MAP TILES - NO MANUAL DOWNLOADS[/b]
 [b]============================================================[/b]
 
@@ -64,7 +66,7 @@ After opening the route, use the [b]MAP TILE SHOW/HIDE[/b] button to display or 
 
 That's it.
 
-[b]============================================================[/b]
+
 [b]WHERE LIDEX STORES THE OSM DATA[/b]
 [b]============================================================[/b]
 
@@ -82,11 +84,11 @@ The small shared Geofabrik regional index and the route-cache registry remain un
 
 [code]%LocalAppData%\SCOLIDEX[/code]
 
-In other words - the large PBF download stays in the route folder where it can be seen and managed, rather than quietly filling a hidden application-data folder. If the same route is processed again, LIDEX can use the existing valid download instead of fetching it all over again.
+In other words - large PBF downloads stay in route folders where they can be seen and managed, rather than quietly filling a hidden application-data folder. LIDEX checks the selected route first, then sibling and registered route caches. If any existing PBF covers the selection, LIDEX uses it directly from that location without copying it. Only when no covering cache exists does LIDEX download a fresh PBF into the selected route. Purge an existing PBF before a run when a fresh download is wanted.
 
 When exiting LIDEX, the cache screen lists regional PBF files and incomplete downloads individually. Every purge box is clear by default. The small shared index is not included in the purge, and LIDEX never deletes the generated map images from the route's [b]terrain_maps[/b] folder.
 
-[b]============================================================[/b]
+
 [b]BASIC WORKFLOW[/b]
 [b]============================================================[/b]
 
@@ -101,7 +103,7 @@ When exiting LIDEX, the cache screen lists regional PBF files and incomplete dow
 
 LIDEX can work from existing route tiles or build coverage from a tile list, marker file, KML file, or track database. Scan remains read-only. Run writes only the production stages you selected and that Scan determined had a viable data source.
 
-[b]============================================================[/b]
+
 [b]REQUIREMENTS AND NOTES[/b]
 [b]============================================================[/b]
 
@@ -113,7 +115,7 @@ LIDEX can work from existing route tiles or build coverage from a tile list, mar
 [*]SCO LIDEX is released under GNU GPL v3 or later.
 [/list]
 
-[b]============================================================[/b]
+
 [b]DOWNLOAD SCO LIDEX v1.200[/b]
 [b]============================================================[/b]
 

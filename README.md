@@ -26,7 +26,7 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 #### Normal and Distant Mountain Terrain
 
 - Creates or updates normal route terrain in **Append** or **Overwrite** mode.
-- Creates TSRE-style Distant Mountain `lo_tiles` from 10-meter elevation data.
+- Creates TSRE-style Distant Mountain `lo_tiles` exclusively from Copernicus GLO-30 data, resampled onto the 128-meter low-terrain grid.
 - Detects and replaces incompatible DEMEX-style distant mountain terrain when Distant Mountain generation is selected.
 - Preserves existing texture, water, overlay, and patch choices during normal updates whenever the source tile layout can be patched safely.
 - Includes clean normal-terrain and `lo_tile` templates for first-time creation and recovery from unsupported or damaged terrain files.
@@ -41,24 +41,24 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 
 #### Safety, Validation, and Recovery
 
-- Performs a read-only **Scan** before Run and validates route paths, selected tiles, raw-grid readability, decoded coordinates, templates, and a representative USGS service request.
+- Performs a read-only **Scan** before Run and validates route paths, selected tiles, raw-grid readability, decoded coordinates, templates, and only the data sources required by the selected stages.
 - Provides **Scan Override** for deliberate advanced or known-good workflows.
 - Marks retryable failures so Append can retry them automatically.
 - Prints paste-ready failed-tile lists for targeted `SCOLIDEXTiles.txt` retries and separates unmappable failures that cannot be retried by tile name.
-- Provides live totals for processed, skipped, failed, 1m, 5m~, and 10m work.
+- Provides live totals for processed, skipped, failed, 1m, 5m~, 10m, and 30m-global work.
 - Supports **Abort** and stops before the next tile or write step.
 
 #### Application and Diagnostics
 
 - Provides a Windows WinForms interface with a formatted, read-only Help viewer.
 - Prevents multiple GUI instances from running simultaneously.
-- Writes `SCOLIDEX.log` to the user's Desktop with selected settings, projection details, source usage, elapsed time, failures, and an estimated USGS data-read total.
+- Writes `SCOLIDEX.log` to the user's Desktop with selected settings, projection details, source usage, elapsed time, failures, and separate USGS/Copernicus data-read totals.
 - Writes `SCOLIDEX-startup-error.txt` to the Desktop if startup fails before the GUI opens.
 - Ships as a self-contained Windows x64 distribution with GDAL, clean terrain templates, documentation, third-party notices, and a desktop shortcut helper.
 
 ### v1.100 — Additional Work
 
-- Corrects standard-projection terrain placement by **16 meters east and 16 meters south** to match the TSRE map-coordinate convention confirmed across multiple test routes.
+- Uses the calibrated standard-projection terrain baseline of **11 meters east and 16 meters south** to match TSRE map coordinates; v1.100 introduced the correction and v1.200 refines its east/west component.
 - Applies the correction at geographic sampling time to both normal terrain and Distant Mountain generation, preserving consistent tile transitions.
 - Leaves route-specific `TsreGeoProjection` mapping unchanged; the correction is only the standard-projection baseline.
 - Treats Advanced Geo Bias values as additional route-specific offsets on top of the corrected standard baseline.
@@ -69,19 +69,22 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 ### v1.200 — What's New
 
 - Adds non-overlapping interface sounds for application buttons, checkbox/radio selections, normal status-stage changes, successful Scan/Run completion, and failure/error/abort indications; all supplied WAV assets remain packaged.
-- Retains the isolated **Experimental – 4m** implementation for complete KML terrain footprints, 512×512 grids, seam merging and optional maps, but deactivates its export switch; the GUI remains fixed to **Normal – 8m**.
+- Retains the isolated 4m evaluation implementation, but keeps the packaged GUI fixed to **Normal - 8 m**; the disabled teaser is labeled **Testing - 4 m**.
+- Adds a disabled **Create Mosaic Tiles** teaser for future development.
+- Adds the full Beast of Burden SCO LIDEX title graphic, a restrained textured title plate, and a slightly taller layout without reducing the running log.
 - Restores the **Route Path Browse** button and adds a clearly labeled **Recent** menu for the five most recently used valid routes, saved in `%LocalAppData%\SCOLIDEX\route-history.json`.
 - Adds key-free global elevation fallback using Copernicus DEM GLO-30 Public Cloud Optimized GeoTIFFs on AWS Open Data.
 - Uses the established USGS `1m` → `5m~` → `10m` sequence first, then fills only unresolved posts from `30m (global)` data.
-- Supports the same global fallback for normal route terrain and TSRE-style Distant Mountain terrain.
+- Uses Copernicus GLO-30 exclusively for Distant Mountains, resampling 30-meter source data onto their 128-meter low-terrain grid; DM-only Scan and Run do not query USGS.
 - Identifies the source as a low-resolution digital surface model that may include vegetation, buildings, and infrastructure.
 - Adds separate `30m (global)` status counters, an amber `GLOBAL - LOW RES MODE` indicator, representative-source Scan validation, and Copernicus data-read totals.
 - Reports USGS 1m, 5m~, 10m, Copernicus, and Geofabrik status separately at the end of Scan; viable fallbacks enable Run with warnings while failed or uncovered sources are excluded from that Run.
-- Allows cached Geofabrik index/PBF data to keep map generation available during an outage; otherwise only maps are skipped while viable terrain/DM work can continue.
-- Stores each downloaded Geofabrik PBF with its route under `osm_data\geofabrik`, writes a portable `osm_data\osm-cache.json` manifest, and migrates a matching legacy AppData PBF without redownloading it.
-- Keeps the small shared Geofabrik index and a cross-route cache registry under `%LocalAppData%\SCOLIDEX`, allowing route-local OSM data to be rediscovered after later launches.
+- Searches OSM caches before downloading: the selected route first, then sibling and registered route caches. A covering cache is used directly in place without copying it.
+- Downloads a fresh Geofabrik PBF into the selected route only when no existing route cache covers the selection. Purging a cached PBF is the user's explicit refresh mechanism.
+- Stores each new Geofabrik PBF under its route's `osm_data\geofabrik` folder and writes a portable `osm_data\osm-cache.json` manifest.
+- Keeps only the small shared Geofabrik index and cross-route cache registry under `%LocalAppData%\SCOLIDEX`; large PBF data is never stored in AppData.
 - Replaces the all-or-nothing exit purge with an unchecked, per-cache list covering regional PBFs and incomplete downloads. The small shared Geofabrik index and generated TSRE map PNGs are never offered for deletion.
-- Grows the application window to add the new row without reducing the running-log area.
+- Refines the standard-projection baseline to 11 meters east and 16 meters south.
 - Isolates Copernicus naming, discovery, validation, and COG reads in `Program.Copernicus.cs`.
 - Enables **Create Map Tiles** using anonymous Geofabrik regional OpenStreetMap PBF extracts rather than the public OSM editing API.
 - Renders one 4096×4096 map overlay per selected 2048-meter normal terrain tile and writes it directly to TSRE's F3 `terrain_maps/<X*10000+Y>.png` cache.

@@ -3,6 +3,24 @@ SCO LIDEX Changelog
 
 v1.200
 ------
+- Refined the standard-projection calibration from 16m east / 16m south to the
+  calculated 11m east / 16m south baseline. Advanced Geo Bias remains an
+  additional route-specific adjustment.
+- Changed Distant Mountains to Copernicus GLO-30 exclusively. The 30m source is
+  resampled onto the existing 128m low-terrain grid; DM-only Scan and Run no
+  longer query USGS 1m, 5m~, or 10m.
+- Added route-cache-first OSM discovery. LIDEX checks the selected route first,
+  then sibling and registered route caches, and uses a covering PBF directly
+  from its existing location without copying it.
+- Removed large AppData PBF/partial-download storage and migration. A fresh PBF
+  is downloaded into the selected route only when no covering route cache
+  exists; purging the cached PBF is the explicit refresh operation.
+- Added the full Beast of Burden SCO LIDEX header graphic and restrained title
+  plate, increased the default window height without shrinking the log, and
+  added a disabled Create Mosaic Tiles teaser.
+- Locked the packaged GUI to Normal - 8 m and renamed the disabled evaluation
+  teaser to Testing - 4 m. The internal selected-footprint 4m path remains
+  available for coordinated testing and can sequence optional DM/maps.
 - Changed Scan from all-or-nothing service gating to a per-source capability
   plan covering USGS 1m, 5m~, 10m, Copernicus 30m global, and Geofabrik maps.
 - Added a final source-status and Run-plan summary. Individual outages remain
@@ -18,8 +36,8 @@ v1.200
 - Added explicit terrain, Distant Mountain, and OSM/map completion statuses.
 - Moved downloaded Geofabrik PBF extracts into each route's
   osm_data\geofabrik folder and added a portable osm-cache.json manifest.
-- Added verified migration of matching legacy AppData PBF and partial-download
-  data so existing large downloads are reused rather than fetched again.
+- Added direct reuse of covering PBFs from other known route caches without
+  duplicating large downloads.
 - Added an AppData cache-registry-v1.json index for discovering route-local
   caches while keeping the route manifest authoritative.
 - Replaced whole-cache exit deletion with unchecked per-cache selections for
@@ -30,8 +48,8 @@ v1.200
 - Classified generated terrain_maps PNG files as permanent route output; cache
   cleanup never lists, deletes, or removes those map images or their folder.
 - Sources that fail or report no representative coverage during Scan are not
-  polled during the following Run. Copernicus can carry global terrain and DM
-  work independently of USGS availability.
+  polled during the following Run. Copernicus can carry global normal terrain
+  and is the exclusive Distant Mountain source independently of USGS.
 - A Geofabrik outage no longer blocks terrain or DM. Map generation uses a
   usable cached regional index/PBF without polling the failed service, or skips
   only the map stage when no valid cache exists.
@@ -57,13 +75,11 @@ v1.200
   download/processing/rendering, completion, failure, and abort stages using one
   consistent color. Terrain and DM failures now finish their current batch and
   gate all later production stages so Append/correction can occur first.
-- Added an isolated experimental 4m normal-terrain test path: KML can create the
-  full route footprint, every normal tile is generated as a 512x512 grid, shared
-  edges/corners are merged, and optional map textures run afterward. DM remains
-  disabled and the established 8m writer is unchanged.
-- Deactivated 4m export after the initial test build while retaining the complete
-  implementation behind one internal feature switch. The GUI now remains fixed
-  to Normal - 8m output.
+- Added an isolated experimental 4m normal-terrain test path: selected tiles are
+  generated as 512x512 grids, shared edges/corners are merged, and optional DM
+  and map stages can run afterward. The established 8m writer is unchanged.
+- Kept the packaged GUI fixed to Normal - 8 m while retaining the internal 4m
+  evaluation path for coordinated Open Rails format testing.
 - Restored the Route Path Browse button with the Windows folder-selection dialog.
 - Added a clearly labeled Recent menu backed by
   %LocalAppData%\SCOLIDEX\route-history.json, retaining the five most recent valid route
@@ -98,8 +114,8 @@ v1.200
   Database, or text-list selection creates route tiles, ensuring newly created
   .t, _y.raw, and world-file sets appear as editable base terrain in TSRE.
 - Added anonymous Copernicus DEM GLO-30 Public fallback coverage after the
-  existing USGS 1m, 5m~, and 10m sources for normal and Distant Mountain
-  terrain.
+  existing USGS 1m, 5m~, and 10m sources for normal terrain, and made it the
+  exclusive Distant Mountain source.
 - Added separate 30m (global) status counters, low-resolution mode indicator,
   source logging, scan validation, and data-read accounting.
 - Increased the window height to accommodate the new status row without

@@ -7,6 +7,7 @@
 
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Diagnostics;
 using System.IO;
 using System.Globalization;
@@ -52,6 +53,7 @@ internal sealed partial class TopoForm : Form
     private readonly CheckBox createRouteTiles = new();
     private readonly CheckBox distantMountains = new();
     private readonly CheckBox createMapTiles = new();
+    private readonly CheckBox createMosaicTiles = new();
     private readonly CheckBox cleanTileTemplate = new();
     private readonly CheckBox scanOverride = new();
     private readonly RadioButton normalOutput = new();
@@ -118,8 +120,8 @@ internal sealed partial class TopoForm : Form
     {
         Text = "SCO LIDEX";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(960, 1000);
-        Size = new Size(980, 1050);
+        MinimumSize = new Size(960, 1024);
+        Size = new Size(980, 1124);
         DoubleBuffered = true;
         ResizeRedraw = true;
         BackColor = AppBackColor;
@@ -155,80 +157,43 @@ internal sealed partial class TopoForm : Form
         titlePanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titlePanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         titlePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 2));
-
-        TableLayoutPanel brandPanel = new()
+        titlePanel.Paint += (_, e) =>
         {
-            AutoSize = true,
-            Anchor = AnchorStyles.Left,
-            ColumnCount = 2,
-            RowCount = 1,
-            BackColor = HeaderBackColor,
-            Margin = new Padding(0),
+            Rectangle surface = titlePanel.ClientRectangle;
+            if (surface.Width <= 1 || surface.Height <= 1)
+            {
+                return;
+            }
+
+            using LinearGradientBrush plate = new(
+                surface,
+                Color.FromArgb(238, 235, 230),
+                Color.FromArgb(224, 220, 214),
+                LinearGradientMode.Vertical);
+            e.Graphics.FillRectangle(plate, surface);
+
+            using Pen brushedLine = new(Color.FromArgb(9, 91, 76, 66));
+            for (int y = 7; y < surface.Height - 3; y += 8)
+            {
+                e.Graphics.DrawLine(brushedLine, 2, y, surface.Width - 3, y);
+            }
+
+            using Pen copperEdge = new(Color.FromArgb(150, 93, 58));
+            using Pen graphiteEdge = new(Color.FromArgb(91, 84, 77));
+            e.Graphics.DrawRectangle(copperEdge, 0, 0, surface.Width - 1, surface.Height - 1);
+            e.Graphics.DrawRectangle(graphiteEdge, 1, 1, surface.Width - 3, surface.Height - 3);
         };
-        brandPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        brandPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
         PictureBox titleImage = new()
         {
-            Size = new Size(162, 108),
-            Margin = new Padding(0, 0, 20, 0),
+            Size = new Size(428, 108),
+            Anchor = AnchorStyles.Left,
+            BackColor = Color.Transparent,
+            Margin = new Padding(5, 0, 0, 0),
             SizeMode = PictureBoxSizeMode.Zoom,
             Image = LoadTitleImage(),
         };
         titleImage.Visible = titleImage.Image is not null;
-
-        TableLayoutPanel brandText = new()
-        {
-            AutoSize = true,
-            Anchor = AnchorStyles.Left,
-            ColumnCount = 1,
-            RowCount = 2,
-            BackColor = HeaderBackColor,
-            Margin = new Padding(0, 24, 0, 0),
-        };
-        brandText.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        brandText.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        brandText.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        TableLayoutPanel titleLine = new()
-        {
-            AutoSize = true,
-            ColumnCount = 2,
-            RowCount = 1,
-            BackColor = HeaderBackColor,
-            Margin = new Padding(0),
-        };
-        titleLine.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        titleLine.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        Label title = new()
-        {
-            AutoSize = true,
-            Font = new Font("Segoe UI Semibold", 22, FontStyle.Regular),
-            ForeColor = HelpTextColor,
-            Text = "SCO LIDEX",
-            Margin = new Padding(0, 0, 0, 0),
-        };
-        Label openRailsTag = new()
-        {
-            AutoSize = true,
-            Font = new Font("Segoe UI", 10, FontStyle.Regular),
-            ForeColor = MutedTextColor,
-            Anchor = AnchorStyles.Bottom,
-            Text = "for Open Rails",
-            Margin = new Padding(10, 0, 0, 5),
-        };
-        Label brandName = new()
-        {
-            AutoSize = true,
-            Font = new Font("Segoe UI", 10, FontStyle.Regular),
-            ForeColor = AccentColor,
-            Text = "Beast of Burden",
-            Margin = new Padding(2, 0, 0, 0),
-        };
-        titleLine.Controls.Add(title, 0, 0);
-        titleLine.Controls.Add(openRailsTag, 1, 0);
-        brandText.Controls.Add(titleLine, 0, 0);
-        brandText.Controls.Add(brandName, 0, 1);
-        brandPanel.Controls.Add(titleImage, 0, 0);
-        brandPanel.Controls.Add(brandText, 1, 0);
 
         versionLabel.AutoSize = true;
         versionLabel.Anchor = AnchorStyles.Right | AnchorStyles.Top;
@@ -247,7 +212,7 @@ internal sealed partial class TopoForm : Form
             BackColor = Color.FromArgb(188, 172, 158),
             Margin = new Padding(0, 8, 0, 0),
         };
-        titlePanel.Controls.Add(brandPanel, 0, 0);
+        titlePanel.Controls.Add(titleImage, 0, 0);
         titlePanel.Controls.Add(versionLabel, 1, 0);
         titlePanel.Controls.Add(divider, 0, 1);
         titlePanel.SetColumnSpan(divider, 2);
@@ -311,8 +276,6 @@ internal sealed partial class TopoForm : Form
         {
             if (experimentalOutput.Checked)
             {
-                createRouteTiles.Checked = true;
-                distantMountains.Checked = false;
                 overwriteMode.Checked = true;
             }
             SetRunning(runCancellation is not null);
@@ -439,8 +402,8 @@ internal sealed partial class TopoForm : Form
         Panel panel = new()
         {
             Dock = DockStyle.Top,
-            Height = 512,
-            MinimumSize = new Size(0, 512),
+            Height = 536,
+            MinimumSize = new Size(0, 536),
             BackColor = AppBackColor,
         };
 
@@ -463,13 +426,14 @@ internal sealed partial class TopoForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(6, 8, 0, 0),
             BackColor = PanelBackColor,
             ForeColor = TextColor,
         };
         optionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
         optionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -481,6 +445,9 @@ internal sealed partial class TopoForm : Form
         createMapTiles.Text = "Create Map Tiles";
         createMapTiles.AutoSize = true;
         createMapTiles.Enabled = true;
+        createMosaicTiles.Text = "Create Mosaic Tiles";
+        createMosaicTiles.AutoSize = true;
+        createMosaicTiles.Enabled = false;
         cleanTileTemplate.Text = "Clean Tile Wipe (Destructive)";
         cleanTileTemplate.AutoSize = true;
         scanOverride.Text = "Scan Override";
@@ -490,11 +457,13 @@ internal sealed partial class TopoForm : Form
         distantMountains.Margin = new Padding(3, 3, 3, 3);
         scanOverride.Margin = new Padding(3, 3, 3, 3);
         createMapTiles.Margin = new Padding(3, 3, 3, 3);
+        createMosaicTiles.Margin = new Padding(3, 3, 3, 3);
         optionPanel.Controls.Add(createRouteTiles, 0, 0);
         optionPanel.Controls.Add(cleanTileTemplate, 1, 0);
         optionPanel.Controls.Add(distantMountains, 0, 1);
         optionPanel.Controls.Add(scanOverride, 1, 1);
         optionPanel.Controls.Add(createMapTiles, 0, 2);
+        optionPanel.Controls.Add(createMosaicTiles, 0, 3);
         optionBox.Controls.Add(optionPanel);
 
         GroupBox coverageBox = new() { Text = "Selection" };
@@ -574,12 +543,12 @@ internal sealed partial class TopoForm : Form
             int gap = 8;
             int columnWidth = (panel.ClientSize.Width - gap) / 2;
             int rightX = columnWidth + gap;
-            modeBox.SetBounds(0, 0, columnWidth, 114);
-            optionBox.SetBounds(rightX, 0, panel.ClientSize.Width - rightX, 114);
-            coverageBox.SetBounds(0, 124, columnWidth, 286);
-            outputPanel.SetBounds(0, 418, columnWidth, 94);
-            statusPanel.SetBounds(rightX, 124, panel.ClientSize.Width - rightX, 216);
-            postProcessPanel.SetBounds(rightX, 348, panel.ClientSize.Width - rightX, 164);
+            modeBox.SetBounds(0, 0, columnWidth, 138);
+            optionBox.SetBounds(rightX, 0, panel.ClientSize.Width - rightX, 138);
+            coverageBox.SetBounds(0, 148, columnWidth, 286);
+            outputPanel.SetBounds(0, 442, columnWidth, 94);
+            statusPanel.SetBounds(rightX, 148, panel.ClientSize.Width - rightX, 216);
+            postProcessPanel.SetBounds(rightX, 372, panel.ClientSize.Width - rightX, 164);
         }
 
         panel.Resize += (_, _) => LayoutOptionControls();
@@ -605,9 +574,9 @@ internal sealed partial class TopoForm : Form
         normalOutput.AutoSize = true;
         normalOutput.Checked = true;
         normalOutput.Enabled = false;
-        experimentalOutput.Text = "Experimental - 4 m";
+        experimentalOutput.Text = "Testing - 4 m";
         experimentalOutput.AutoSize = true;
-        experimentalOutput.Enabled = Program.Experimental4mExportEnabled;
+        experimentalOutput.Enabled = false;
         outputFlow.Controls.Add(normalOutput);
         outputFlow.Controls.Add(experimentalOutput);
         outputBox.Controls.Add(outputFlow);
@@ -1243,8 +1212,9 @@ internal sealed partial class TopoForm : Form
             DialogResult experimentalConfirm = MessageBox.Show(
                 this,
                 "Create the EXPERIMENTAL 4m terrain test?" + Environment.NewLine + Environment.NewLine +
-                "Every normal terrain tile in this route will be rebuilt as a 512x512, 4m grid. " +
-                "Distant Mountains will not be generated. This format requires the matching Open Rails development build." +
+                "Every selected normal terrain tile will be rebuilt as a 512x512, 4m grid. " +
+                "Distant Mountains and maps will run when their Create options are checked. " +
+                "The 4m terrain format requires the matching Open Rails development build." +
                 Environment.NewLine + Environment.NewLine + "Use only on a backed-up test route.",
                 "SCO LIDEX - Experimental 4m Test",
                 MessageBoxButtons.OKCancel,
@@ -1794,7 +1764,7 @@ internal sealed partial class TopoForm : Form
         browseRouteButton.Enabled = !locked;
         appendMode.Enabled = !locked;
         overwriteMode.Enabled = !locked;
-        createRouteTiles.Enabled = !locked && !experimentalOutput.Checked;
+        createRouteTiles.Enabled = !locked;
         createMapTiles.Enabled = !locked;
         cleanTileTemplate.Enabled = !locked;
         scanOverride.Enabled = !busy && !scanLocked;
@@ -1804,10 +1774,10 @@ internal sealed partial class TopoForm : Form
         trackDatabaseCoverage.Enabled = !locked;
         textFileCoverage.Enabled = !locked;
         terrainRadius.Enabled = !locked && UsesTileRadius();
-        distantMountains.Enabled = !locked && !experimentalOutput.Checked;
-        loTileRadius.Enabled = !locked && !experimentalOutput.Checked && distantMountains.Checked;
+        distantMountains.Enabled = !locked;
+        loTileRadius.Enabled = !locked && distantMountains.Checked;
         normalOutput.Enabled = false;
-        experimentalOutput.Enabled = !locked && Program.Experimental4mExportEnabled;
+        experimentalOutput.Enabled = false;
         postEastWestShiftSlider.Enabled = !locked;
         postEastWestShiftValue.Enabled = !locked;
         postNorthSouthShiftSlider.Enabled = !locked;
@@ -2026,7 +1996,7 @@ internal sealed partial class TopoForm : Form
 
     private static Image? LoadTitleImage()
     {
-        return LoadContentImage("ScoBull.png");
+        return LoadContentImage("SCO-LIDEX-Header.png");
     }
 
     private static Image? LoadContentImage(string fileName)
