@@ -17,6 +17,51 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 - Uses bounded rolling seam windows for 8m, 4m, and Distant Mountains. Each completed grid updates the live counter; completed rows are merged, written, and released without retaining a full-route terrain mesh.
 - Restores obsolete `_map.ace` normal-terrain materials to `terrain.ace` while preserving the separate TSRE F3 `terrain_maps` PNG overlay.
 
+### v1.200 — What's New
+
+- Adds non-overlapping interface sounds for application buttons, checkbox/radio selections, normal status-stage changes, successful Scan/Run completion, and failure/error/abort indications; all supplied WAV assets remain packaged.
+- Retains the isolated 4m evaluation implementation, but keeps the packaged GUI fixed to **Normal - 8 m**; the disabled teaser is labeled **Testing - 4 m**.
+- Adds a disabled **Create Mosaic Tiles** teaser for future development.
+- Adds the full Beast of Burden SCO LIDEX title graphic, a restrained textured title plate, and a slightly taller layout without reducing the running log.
+- Restores the **Route Path Browse** button and adds a clearly labeled **Recent** menu for the five most recently used valid routes, saved in `%LocalAppData%\SCOLIDEX\route-history.json`.
+- Adds key-free global elevation fallback using Copernicus DEM GLO-30 Public Cloud Optimized GeoTIFFs on AWS Open Data.
+- Uses the established USGS `1m` → `5m~` → `10m` sequence first, then fills only unresolved posts from `30m (global)` data.
+- Uses Copernicus GLO-30 exclusively for Distant Mountains, resampling 30-meter source data onto their 128-meter low-terrain grid; DM-only Scan and Run do not query USGS.
+- Identifies the source as a low-resolution digital surface model that may include vegetation, buildings, and infrastructure.
+- Adds separate `30m (global)` status counters, an amber `GLOBAL - LOW RES MODE` indicator, representative-source Scan validation, and Copernicus data-read totals.
+- Reports USGS 1m, 5m~, 10m, Copernicus, and Geofabrik status separately at the end of Scan; viable fallbacks enable Run with warnings while failed or uncovered sources are excluded from that Run.
+- Searches OSM caches before downloading: the selected route first, then sibling and registered route caches. A covering cache is used directly in place without copying it.
+- Downloads a fresh Geofabrik PBF into the selected route only when no existing route cache covers the selection. Purging a cached PBF is the user's explicit refresh mechanism.
+- Stores each new Geofabrik PBF under its route's `osm_data\geofabrik` folder and writes a portable `osm_data\osm-cache.json` manifest.
+- During **Create OSM/Map Tiles**, atomically writes categorized `route-geodata.gpkg`, its `route-geodata.json` manifest, final selectable `polyveg-polygons.geojson`, and `polyveg-exclusions.geojson` under the active route's `osm_data` folder.
+- Exports 12 canonical rural categories as mutually exclusive visible surfaces in the same deterministic drawing order and F3 colors as the LIDEX map: woodland, scrub, heath, wetland, grassland, agriculture, orchard, parkland, golf course, cemetery, sports, and zoo. Every feature includes its exact OSM `styleId`, RGB fill, stable source identity, and useful tags. Permanent road, rail, trail, water, building, developed-land, and bare-ground masks are already carved out; TSRE does not reconstruct stacking or exclusions.
+- Builds derivative coverage from the union of the route's actual 2048-meter normal terrain-tile footprints. Habitat layers are clipped to the exact route coverage; roads, railways, water, buildings, and developed context retain a 2048-meter margin.
+- Streams a regional PBF once to create a compact, spatially indexed route working cut. Map and PolyVeg processing reuse that cut until the source PBF or terrain footprint changes. Visible-surface stacking runs in bounded terrain sections with a one-foot overlap halo and recombines pieces by stable source identity.
+- Stores the 12 rural categories plus water, waterways, buildings, developed land, roads, railways, and bare-ground layers with declared WGS84 coordinates and spatial indexes.
+- Rebuilds derivatives when the regional PBF or normal terrain-tile fingerprint changes. Terrain without an object-bearing `.w` file remains part of PolyVeg coverage. A newly downloaded PBF always refreshes the derivatives; an unchanged current package is reused.
+- Reads a covering PBF from another route in place while saving the newly sliced derivatives under the active route. Derivatives are validated and atomically replace the previous set only after all outputs pass validation.
+- Keeps only the small shared Geofabrik index and cross-route cache registry under `%LocalAppData%\SCOLIDEX`; large PBF data is never stored in AppData.
+- Replaces the all-or-nothing exit purge with an unchecked, per-cache list covering only regional PBFs and incomplete downloads. Route derivatives, the small shared Geofabrik index, and generated TSRE map PNGs are never offered for deletion.
+- Refines the standard-projection baseline to 11 meters east and 16 meters south.
+- Isolates Copernicus naming, discovery, validation, and COG reads in `Program.Copernicus.cs`.
+- Enables **Create OSM/Map Tiles** using anonymous Geofabrik regional OpenStreetMap PBF extracts rather than the public OSM editing API.
+- Renders one 4096×4096 map overlay per selected 2048-meter normal terrain tile and writes it directly to TSRE's F3 `terrain_maps/<X*10000+Y>.png` cache.
+- Overwrites a matching cached PNG without creating a map ACE or changing terrain materials, 16×16 patch UVs, TERRTEX files, or Distant Mountain tiles.
+- Projects every OSM vertex through the same corrected tile-local coordinate path used by terrain sampling; the Austria acceptance route reports zero pixel error at tile corners and center.
+- Loads compact selected-route geometry once, retains it for the complete run, and renders two 4096 bitmaps concurrently.
+- Uses bundled GDAL and TSRE's F3 PNG naming/projection behavior; no API key, external map service, route-editor executable, or legacy MSTS runtime is required.
+- Ports TSRE's OSM drawing style: warm paper background, pale land-use fills, outlined buildings, feature ordering, railway treatment, and cased motorway/primary/secondary/tertiary road colors and widths.
+
+### v1.100 — Additional Work
+
+- Uses the calibrated standard-projection terrain baseline of **11 meters east and 16 meters south** to match TSRE map coordinates; v1.100 introduced the correction and v1.200 refines its east/west component.
+- Applies the correction at geographic sampling time to both normal terrain and Distant Mountain generation, preserving consistent tile transitions.
+- Leaves route-specific `TsreGeoProjection` mapping unchanged; the correction is only the standard-projection baseline.
+- Treats Advanced Geo Bias values as additional route-specific offsets on top of the corrected standard baseline.
+- Adds `GEOMETRY_PLACEMENT_CORRECTION.txt` with the coordinate comparison, 256-post/8-meter grid explanation, and implementation details.
+- Aligns the Windows executable file, assembly, and product metadata with version 1.100.
+- Maintains the tracked and distributed `docsMaster` folder and this Markdown README for GitHub and release-page presentation.
+
 ### v1.000 — Complete Feature Set
 
 #### Terrain Generation and Source Data
@@ -66,51 +111,6 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 - Writes `SCOLIDEX.log` to the user's Desktop with selected settings, projection details, source usage, elapsed time, failures, and separate USGS/Copernicus data-read totals.
 - Writes `SCOLIDEX-startup-error.txt` to the Desktop if startup fails before the GUI opens.
 - Ships as a self-contained Windows x64 distribution with GDAL, clean terrain templates, documentation, third-party notices, and a desktop shortcut helper.
-
-### v1.100 — Additional Work
-
-- Uses the calibrated standard-projection terrain baseline of **11 meters east and 16 meters south** to match TSRE map coordinates; v1.100 introduced the correction and v1.200 refines its east/west component.
-- Applies the correction at geographic sampling time to both normal terrain and Distant Mountain generation, preserving consistent tile transitions.
-- Leaves route-specific `TsreGeoProjection` mapping unchanged; the correction is only the standard-projection baseline.
-- Treats Advanced Geo Bias values as additional route-specific offsets on top of the corrected standard baseline.
-- Adds `GEOMETRY_PLACEMENT_CORRECTION.txt` with the coordinate comparison, 256-post/8-meter grid explanation, and implementation details.
-- Aligns the Windows executable file, assembly, and product metadata with version 1.100.
-- Maintains the tracked and distributed `docsMaster` folder and this Markdown README for GitHub and release-page presentation.
-
-### v1.200 — What's New
-
-- Adds non-overlapping interface sounds for application buttons, checkbox/radio selections, normal status-stage changes, successful Scan/Run completion, and failure/error/abort indications; all supplied WAV assets remain packaged.
-- Retains the isolated 4m evaluation implementation, but keeps the packaged GUI fixed to **Normal - 8 m**; the disabled teaser is labeled **Testing - 4 m**.
-- Adds a disabled **Create Mosaic Tiles** teaser for future development.
-- Adds the full Beast of Burden SCO LIDEX title graphic, a restrained textured title plate, and a slightly taller layout without reducing the running log.
-- Restores the **Route Path Browse** button and adds a clearly labeled **Recent** menu for the five most recently used valid routes, saved in `%LocalAppData%\SCOLIDEX\route-history.json`.
-- Adds key-free global elevation fallback using Copernicus DEM GLO-30 Public Cloud Optimized GeoTIFFs on AWS Open Data.
-- Uses the established USGS `1m` → `5m~` → `10m` sequence first, then fills only unresolved posts from `30m (global)` data.
-- Uses Copernicus GLO-30 exclusively for Distant Mountains, resampling 30-meter source data onto their 128-meter low-terrain grid; DM-only Scan and Run do not query USGS.
-- Identifies the source as a low-resolution digital surface model that may include vegetation, buildings, and infrastructure.
-- Adds separate `30m (global)` status counters, an amber `GLOBAL - LOW RES MODE` indicator, representative-source Scan validation, and Copernicus data-read totals.
-- Reports USGS 1m, 5m~, 10m, Copernicus, and Geofabrik status separately at the end of Scan; viable fallbacks enable Run with warnings while failed or uncovered sources are excluded from that Run.
-- Searches OSM caches before downloading: the selected route first, then sibling and registered route caches. A covering cache is used directly in place without copying it.
-- Downloads a fresh Geofabrik PBF into the selected route only when no existing route cache covers the selection. Purging a cached PBF is the user's explicit refresh mechanism.
-- Stores each new Geofabrik PBF under its route's `osm_data\geofabrik` folder and writes a portable `osm_data\osm-cache.json` manifest.
-- During **Create OSM/Map Tiles**, atomically writes categorized `route-geodata.gpkg`, its `route-geodata.json` manifest, final selectable `polyveg-polygons.geojson`, and `polyveg-exclusions.geojson` under the active route's `osm_data` folder.
-- Exports 12 canonical rural categories as mutually exclusive visible surfaces in the same deterministic drawing order and F3 colors as the LIDEX map: woodland, scrub, heath, wetland, grassland, agriculture, orchard, parkland, golf course, cemetery, sports, and zoo. Every feature includes its exact OSM `styleId`, RGB fill, stable source identity, and useful tags. Permanent road, rail, trail, water, building, developed-land, and bare-ground masks are already carved out; TSRE does not reconstruct stacking or exclusions.
-- Builds derivative coverage from the union of the route's actual 2048-meter normal terrain-tile footprints. Habitat layers are clipped to the exact route coverage; roads, railways, water, buildings, and developed context retain a 2048-meter margin.
-- Streams a regional PBF once to create a compact, spatially indexed route working cut. Map and PolyVeg processing reuse that cut until the source PBF or terrain footprint changes. Visible-surface stacking runs in bounded terrain sections with a one-foot overlap halo and recombines pieces by stable source identity.
-- Stores the 12 rural categories plus water, waterways, buildings, developed land, roads, railways, and bare-ground layers with declared WGS84 coordinates and spatial indexes.
-- Rebuilds derivatives when the regional PBF or normal terrain-tile fingerprint changes. Terrain without an object-bearing `.w` file remains part of PolyVeg coverage. A newly downloaded PBF always refreshes the derivatives; an unchanged current package is reused.
-- Reads a covering PBF from another route in place while saving the newly sliced derivatives under the active route. Derivatives are validated and atomically replace the previous set only after all outputs pass validation.
-- Keeps only the small shared Geofabrik index and cross-route cache registry under `%LocalAppData%\SCOLIDEX`; large PBF data is never stored in AppData.
-- Replaces the all-or-nothing exit purge with an unchecked, per-cache list covering only regional PBFs and incomplete downloads. Route derivatives, the small shared Geofabrik index, and generated TSRE map PNGs are never offered for deletion.
-- Refines the standard-projection baseline to 11 meters east and 16 meters south.
-- Isolates Copernicus naming, discovery, validation, and COG reads in `Program.Copernicus.cs`.
-- Enables **Create OSM/Map Tiles** using anonymous Geofabrik regional OpenStreetMap PBF extracts rather than the public OSM editing API.
-- Renders one 4096×4096 map overlay per selected 2048-meter normal terrain tile and writes it directly to TSRE's F3 `terrain_maps/<X*10000+Y>.png` cache.
-- Overwrites a matching cached PNG without creating a map ACE or changing terrain materials, 16×16 patch UVs, TERRTEX files, or Distant Mountain tiles.
-- Projects every OSM vertex through the same corrected tile-local coordinate path used by terrain sampling; the Austria acceptance route reports zero pixel error at tile corners and center.
-- Loads compact selected-route geometry once, retains it for the complete run, and renders two 4096 bitmaps concurrently.
-- Uses bundled GDAL and TSRE's F3 PNG naming/projection behavior; no API key, external map service, route-editor executable, or legacy MSTS runtime is required.
-- Ports TSRE's OSM drawing style: warm paper background, pale land-use fills, outlined buildings, feature ordering, railway treatment, and cased motorway/primary/secondary/tertiary road colors and widths.
 
 ## Installation
 
