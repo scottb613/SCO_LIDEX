@@ -95,7 +95,7 @@ internal static partial class Program
         int skipped = 0;
         int failed = 0;
         int total = coverage.Count;
-        List<GeneratedLoTile> generatedLoTiles = [];
+        RollingDistantMountainWriter rollingWriter = new();
         string coverageDescription = useMarkerCoverage
             ? $"{route.Markers.Count:N0} markers"
             : useTrackDatabaseCoverage
@@ -114,7 +114,7 @@ internal static partial class Program
         }
 
         int index = 0;
-        foreach (LoTileCoordinate loTile in coverage.OrderBy(t => t.X).ThenBy(t => t.Z))
+        foreach (LoTileCoordinate loTile in coverage.OrderBy(t => t.Z).ThenBy(t => t.X))
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -127,6 +127,7 @@ internal static partial class Program
             string tilePath = Path.Combine(outputDir, loName + ".t");
             string heightPath = Path.Combine(outputDir, loName + "_y.raw");
             Console.WriteLine($"\n[DM {index:N0}/{total:N0}] {loName}.t");
+            rollingWriter.FlushRowsBefore(DistantMountainGridKey(loTile).Z - 1);
 
             EnsureExactFileNameCasing(tilePath);
             EnsureExactFileNameCasing(heightPath);
@@ -177,7 +178,9 @@ internal static partial class Program
                 }
 
                 FileInfo templateTile = FindLoTileTemplate(outputDir, loName) ?? fallbackTemplateTile;
-                generatedLoTiles.Add(new GeneratedLoTile(loTile, loName, templateTile, tilePath, heightPath, heights, 0, globalSamplesUsed));
+                rollingWriter.Add(new GeneratedLoTile(
+                    loTile, loName, templateTile, tilePath, heightPath,
+                    heights, 0, globalSamplesUsed));
                 built++;
                 Console.WriteLine($"  -> Prepared TSRE-style lo_tile with {GlobalDemLabel}={globalSamplesUsed:N0}, neighbor-fill={missingBeforeFill:N0} samples.");
             }
@@ -189,28 +192,150 @@ internal static partial class Program
             }
         }
 
-        if (generatedLoTiles.Count > 0)
+        try
         {
-            Dictionary<(int X, int Z), short[,]> mergeGrid = generatedLoTiles.ToDictionary(
-                tile => (tile.Tile.X / LoTileNormalTileSpan, tile.Tile.Z / LoTileNormalTileSpan),
-                tile => tile.Heights);
-            MergeSharedEdges(mergeGrid);
-
-            foreach (GeneratedLoTile generated in generatedLoTiles.OrderBy(t => t.Tile.X).ThenBy(t => t.Tile.Z))
-            {
-                TerrainSampleEncoding loEncoding = CalculateSampleEncoding(generated.Heights);
-                byte[] tileBytes = CreateTerrainTileFromTemplate(generated.TemplateTile, generated.Name);
-                PatchTerrainSampleMetadata(tileBytes, loEncoding);
-                File.WriteAllBytes(generated.TilePath, tileBytes);
-                WriteEncodedHeightGrid(generated.HeightPath, generated.Heights, loEncoding);
-                Console.WriteLine($"  -> Wrote {generated.Name}.t with merged edges using floor={loEncoding.Floor:F3}, scale={loEncoding.Scale:G9}.");
-            }
+            rollingWriter.FlushAll();
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Distant Mountain rolling write failed: {ex.Message}");
+            failed++;
+        }
+
+        Console.WriteLine(
+            $"Distant Mountain rolling writer peak memory window: " +
+            $"{rollingWriter.PeakPendingCount:N0} lo_tile grid(s).");
 
         int indexedLoTiles = WriteTsreLowTerrainIndex(route.RouteDir, outputDir);
         Console.WriteLine($"Distant Mountains: rebuilt TSRE low-terrain index with {indexedLoTiles:N0} lo_tiles.");
         Console.WriteLine($"\nDistant Mountains done. Generated={built:N0}, skipped={skipped:N0}, failed={failed:N0}, total={total:N0}.");
         return failed;
+    }
+
+    private static (int X, int Z) DistantMountainGridKey(LoTileCoordinate tile)
+    {
+        return (tile.X / LoTileNormalTileSpan, tile.Z / LoTileNormalTileSpan);
+    }
+
+    private static void WriteDistantMountainTile(GeneratedLoTile generated)
+    {
+        TerrainSampleEncoding loEncoding = CalculateSampleEncoding(generated.Heights);
+        byte[] tileBytes = CreateTerrainTileFromTemplate(
+            generated.TemplateTile, generated.Name);
+        PatchTerrainSampleMetadata(tileBytes, loEncoding);
+        File.WriteAllBytes(generated.TilePath, tileBytes);
+        WriteEncodedHeightGrid(
+            generated.HeightPath, generated.Heights, loEncoding);
+        Console.WriteLine(
+            $"  -> Wrote {generated.Name}.t from rolling DM seam window using " +
+            $"floor={loEncoding.Floor:F3}, scale={loEncoding.Scale:G9}.");
+    }
+
+    private sealed class RollingDistantMountainWriter
+    {
+        private readonly Dictionary<(int X, int Z), GeneratedLoTile> pending = [];
+
+        public int PeakPendingCount { get; private set; }
+
+        public void Add(GeneratedLoTile generated)
+        {
+            (int X, int Z) key = DistantMountainGridKey(generated.Tile);
+            if (!pending.TryAdd(key, generated))
+            {
+                throw new InvalidOperationException(
+                    $"duplicate Distant Mountain coordinate X={key.X}, Z={key.Z}");
+            }
+
+            MergeWithPendingNeighbors(key, generated.Heights);
+            PeakPendingCount = Math.Max(PeakPendingCount, pending.Count);
+        }
+
+        public void FlushRowsBefore(int minZToKeep)
+        {
+            FlushRows(pending.Keys
+                .Select(key => key.Z)
+                .Distinct()
+                .Where(z => z < minZToKeep)
+                .OrderBy(z => z)
+                .ToList());
+        }
+
+        public void FlushAll()
+        {
+            FlushRows(pending.Keys
+                .Select(key => key.Z)
+                .Distinct()
+                .OrderBy(z => z)
+                .ToList());
+        }
+
+        private void MergeWithPendingNeighbors((int X, int Z) key, short[,] heights)
+        {
+            if (pending.TryGetValue((key.X - 1, key.Z), out GeneratedLoTile? west))
+            {
+                MergeLoVerticalEdge(west.Heights, heights);
+            }
+
+            if (pending.TryGetValue((key.X + 1, key.Z), out GeneratedLoTile? east))
+            {
+                MergeLoVerticalEdge(heights, east.Heights);
+            }
+
+            if (pending.TryGetValue((key.X, key.Z - 1), out GeneratedLoTile? south))
+            {
+                MergeLoHorizontalEdge(south.Heights, heights);
+            }
+
+            if (pending.TryGetValue((key.X, key.Z + 1), out GeneratedLoTile? north))
+            {
+                MergeLoHorizontalEdge(heights, north.Heights);
+            }
+        }
+
+        private void FlushRows(IReadOnlyCollection<int> rowsToFlush)
+        {
+            if (rowsToFlush.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<(int X, int Z), short[,]> rawWindow = pending.ToDictionary(
+                item => item.Key, item => item.Value.Heights);
+            MergeSharedEdges(rawWindow);
+
+            List<(int X, int Z)> keysToFlush = pending.Keys
+                .Where(key => rowsToFlush.Contains(key.Z))
+                .OrderBy(key => key.Z)
+                .ThenBy(key => key.X)
+                .ToList();
+            foreach ((int X, int Z) key in keysToFlush)
+            {
+                WriteDistantMountainTile(pending[key]);
+                pending.Remove(key);
+            }
+        }
+
+        private static void MergeLoVerticalEdge(short[,] west, short[,] east)
+        {
+            int edge = LoRawGridSize - 1;
+            for (int y = 0; y < LoRawGridSize; y++)
+            {
+                short merged = MergeHeights(west[y, edge], east[y, 0]);
+                west[y, edge] = merged;
+                east[y, 0] = merged;
+            }
+        }
+
+        private static void MergeLoHorizontalEdge(short[,] south, short[,] north)
+        {
+            int edge = LoRawGridSize - 1;
+            for (int x = 0; x < LoRawGridSize; x++)
+            {
+                short merged = MergeHeights(south[0, x], north[edge, x]);
+                south[0, x] = merged;
+                north[edge, x] = merged;
+            }
+        }
     }
 
     private static int WriteTsreLowTerrainIndex(string routeDir, string loTilesDir)
@@ -259,12 +384,60 @@ internal static partial class Program
 
     private static RawGridStats? TryGetRawGridStats(string? rawPath)
     {
-        if (string.IsNullOrWhiteSpace(rawPath) || !RawGrid.TryRead(rawPath, out RawGrid? grid, out _) || grid is null)
+        return TryGetRawGridStats(rawPath, OrtsRawGridSize);
+    }
+
+    private static RawGridStats? TryGetRawGridStats(
+        string? rawPath,
+        int expectedGridSize)
+    {
+        if (string.IsNullOrWhiteSpace(rawPath) || expectedGridSize <= 0 ||
+            !File.Exists(rawPath))
         {
             return null;
         }
 
-        return grid.GetStats();
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(rawPath);
+        }
+        catch
+        {
+            return null;
+        }
+
+        int expectedBytes = expectedGridSize * expectedGridSize * sizeof(short);
+        if (bytes.Length != expectedBytes)
+        {
+            return null;
+        }
+
+        int valid = 0;
+        int missing = 0;
+        short min = short.MaxValue;
+        short max = short.MinValue;
+        for (int offset = 0; offset < bytes.Length; offset += sizeof(short))
+        {
+            short height = BitConverter.ToInt16(bytes, offset);
+            if (height == RawMissingHeight)
+            {
+                missing++;
+                continue;
+            }
+
+            valid++;
+            min = Math.Min(min, height);
+            max = Math.Max(max, height);
+        }
+
+        return new RawGridStats(
+            expectedGridSize,
+            expectedGridSize,
+            valid,
+            missing,
+            valid == 0 ? RawMissingHeight : min,
+            valid == 0 ? RawMissingHeight : max);
     }
 
     private static void MarkDistantMountainTileForAppendRetry(string tilePath, string heightPath)

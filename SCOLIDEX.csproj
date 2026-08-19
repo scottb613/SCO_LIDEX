@@ -8,9 +8,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>SCOLIDEX</AssemblyName>
     <Product>SCO LIDEX</Product>
-    <Version>1.200.0</Version>
-    <AssemblyVersion>1.200.0.0</AssemblyVersion>
-    <FileVersion>1.200.0.0</FileVersion>
+    <Version>1.300.0</Version>
+    <AssemblyVersion>1.300.0.0</AssemblyVersion>
+    <FileVersion>1.300.0.0</FileVersion>
     <ApplicationIcon>SCOtopo.ico</ApplicationIcon>
     <!-- FIX: Force the compiler to build for 64-bit to match GDAL -->
     <PlatformTarget>x64</PlatformTarget>
@@ -32,7 +32,7 @@
     <Content Include="content\SCO-LIDEX-Header.png" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
     <Content Include="content\Contact.png" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
     <Content Include="content\*.wav" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
-    <Content Include="docs\**\*.*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="docsMaster\**\*.*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="generated-tiles\**\*.*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="generated-lo_tiles\**\*.*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

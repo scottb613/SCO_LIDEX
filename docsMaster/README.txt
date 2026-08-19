@@ -7,10 +7,32 @@ elevation data, builds normal terrain and optional TSRE-style distant
 mountains, validates the work,
 and writes terrain back into an existing route.
 
-Latest release: v1.200.
+The exact planting handoff is documented in
+docsMaster\POLYVEG-GEODATA-CONTRACT-v2.txt.
+
+Current version: v1.300.
 
 Release highlights
 ==================
+
+v1.300 - What's New
+-------------------
+
+- Defaults Create Route Tiles, Create DM Tiles, and Create OSM/Map Tiles on.
+  Enable HD Mesh Tiles unlocks the 4m terrain choice; otherwise terrain remains
+  locked to Normal - 8m Tiles.
+- Creates 2048x2048 map overlays by default. Enable HD Map Tiles selects
+  4096x4096 output.
+- Scan checks mixed terrain resolution only when Create Route Tiles is selected.
+  Scan is read-only; approved conversion occurs during Run.
+- After styled approval, Run rebuilds every mismatched tile from current
+  elevation data in the selected resolution, including mismatches outside the
+  original selection. Matching tiles remain under the selected Run mode.
+- Uses bounded rolling seam windows for 8m, 4m, and Distant Mountains. Each
+  completed grid updates the counter; completed rows are merged, written, and
+  released without retaining a full-route terrain mesh.
+- Restores legacy `_map.ace` normal-terrain materials to `terrain.ace` while
+  preserving the separate TSRE F3 `terrain_maps` PNG overlay.
 
 v1.200 - What's New
 -------------------
@@ -39,26 +61,37 @@ v1.200 - What's New
   sources are not polled during that Run.
 - Searches the selected route cache first, then sibling and registered route
   caches. A covering PBF is used directly in place without copying it.
-- Enables Create Map Tiles from anonymous Geofabrik OpenStreetMap regional PBF
+- Enables Create OSM/Map Tiles from anonymous Geofabrik OpenStreetMap regional PBF
   extracts, with resumable route-local caching and no public OSM API bulk use.
 - Stores the regional PBF under osm_data\geofabrik in the route and writes an
   osm_data\osm-cache.json manifest for discovery and reuse.
 - Downloads a fresh PBF into the selected route only when no covering route
   cache exists. Purging a PBF is the user's explicit refresh mechanism.
-- During Create Map Tiles, writes route OSM derivatives under the active
+- During Create OSM/Map Tiles, writes route OSM derivatives under the active
   route's osm_data folder: categorized route-geodata.gpkg, its
-  route-geodata.json manifest, and TSRE-compatible forest-polygons.geojson.
-- Uses the union of the route's actual 2048-meter world-tile footprints.
+  route-geodata.json manifest, final polyveg-polygons.geojson, and
+  polyveg-exclusions.geojson. Twelve canonical rural categories are mutually
+  exclusive and permanent exclusions are already carved out for TSRE. Exact
+  OSM style IDs, F3 RGB fills, draw order, and stable source IDs are retained.
+- Uses the union of the route's actual 2048-meter normal terrain-tile
+  footprints.
   Habitat layers use exact route coverage; transport, water, building, and
   developed-context layers retain a 2048-meter margin.
 - Stores indexed WGS84 layers for woodland, scrub, heath, grassland, wetland,
-  water, waterways, buildings, developed land, agriculture, roads, railways,
-  and bare ground.
-- Rebuilds derivatives when the PBF or route world-tile fingerprint changes.
+  agriculture, orchard, parkland, golf course, cemetery, sports, zoo, water,
+  waterways, buildings, developed land, roads, railways, and bare ground.
+- Rebuilds derivatives when the PBF or normal terrain-tile fingerprint changes.
+  Terrain without an object-bearing .w file remains in PolyVeg coverage.
   A fresh PBF download always refreshes them; a current package is reused.
+- Streams the regional PBF once into a compact, spatially indexed route working
+  cut. Map and PolyVeg processing reuse it until the source PBF or terrain
+  footprint changes. Visible surfaces are stacked in bounded terrain sections
+  with a one-foot overlap halo and recombined by stable source identity.
 - Reads a covering PBF from another route in place and saves the sliced
   derivatives under the active route. Validated outputs atomically replace the
-  previous derivative set.
+  previous derivative set. The PolyVeg exclusion cache contains route-clipped,
+  already-buffered road, track, trail, and water corridors plus protected
+  water, building, developed, and bare-ground polygons.
 - Keeps only the small Geofabrik index and cross-route cache registry under
   %LocalAppData%\SCOLIDEX; large PBF data is never stored in AppData.
 - Lists only regional PBFs and partial downloads on exit. Purge boxes are
@@ -161,13 +194,13 @@ v1.100 - Additional work
   256-post/8-meter grid explanation, and implementation details.
 - Aligns the Windows executable file, assembly, and product metadata with
   version 1.100.
-- Restores a tracked and distributed docs folder and adds this Markdown README
+- Maintains the tracked and distributed docsMaster folder and this Markdown README
   for GitHub and release-page presentation.
 
 Installation
 ============
 
-1. Download SCOLIDEX-v1.200-win-x64.zip from the GitHub release.
+1. Download SCOLIDEX-v1.300-win-x64.zip from the GitHub release.
 2. Extract the complete archive to a writable folder.
 3. Run SCOLIDEX-win-x64\SCOLIDEX.exe.
 4. Optionally run AddShortcutDesktop.cmd from the extracted top-level folder.
@@ -180,7 +213,7 @@ Requirements and limitations
 - Internet access while requesting elevation or Geofabrik map data.
 - USGS elevation coverage is United States focused.
 - Large routes can require substantial processing time and disk space.
-- Map overlays are compressed 4096x4096 PNG files in the route terrain_maps cache.
+- Map overlays are 2048x2048 PNG files by default or 4096x4096 when HD maps are enabled.
 - Clean Tile Wipe and post-processing terrain shifts modify route files; always
   work from a backup.
 - KML polygon filling is basic and should be considered experimental.
@@ -190,9 +223,9 @@ Requirements and limitations
 Documentation
 =============
 
-See the docs folder for the complete instructions, changelog, known issues,
-build notes, geometry-placement technical note, sample tile list, license, and
-third-party notices.
+See the docsMaster folder for the complete instructions, changelog, known
+issues, build notes, geometry-placement technical note, sample tile list,
+license, third-party notices, and the PolyVeg geodata contract.
 
 License
 -------

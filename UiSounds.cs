@@ -36,7 +36,7 @@ internal static class UiSounds
                 return;
             }
 
-            PlayLocked("SCOprogress.wav");
+            PlayLocked("SCOpluck.wav");
         }
     }
 

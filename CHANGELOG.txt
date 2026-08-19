@@ -1,6 +1,99 @@
 SCO LIDEX Changelog
 ===================
 
+v1.300
+------
+- Added Options controls for HD terrain meshes and HD map images. Route, DM,
+  and OSM/map creation default on. Terrain remains locked to Normal - 8m until
+  Enable HD Mesh Tiles is selected; maps default to 2048x2048 and Enable HD
+  Map Tiles selects 4096x4096 output.
+- Scan skips route terrain resolution inspection when Create Route Tiles is
+  off. When route terrain is selected, Scan remains read-only: it flags mixed
+  8m/4m output and records approval, while Run performs the conversion.
+- Added short, behavior-specific tooltips for every control in Options.
+- Added `natural=tree_row` processing for rural terrain. Each OSM way becomes
+  a separate 10 m-wide dark-green woodland PolyVeg feature at drawOrder 30,
+  above ordinary woodland and agriculture. Existing permanent exclusions still
+  carve the derived strip, and woodland-category planting includes tree rows.
+- Distinguished confirmed DEM no-coverage results from temporary USGS source
+  hiccups. A hiccup now tries cached products first; if cached data cannot
+  complete the requested source tier, the tile is not generated from a lower
+  resolution, is marked for Append retry, and appears in the failed-tile list.
+  HD Test - 4m failures now print the same targeted retry block as 8m terrain.
+- Enabled both terrain outputs with the final labels Normal - 8m Tiles and
+  HD Test - 4m Tiles. Scan now checks the resolution of every terrain tile on
+  the route, independent of the selected coverage mode. After styled user
+  approval, Run forces every mismatched tile into the selected output and
+  rebuilds it from current elevation data, even when it was outside the
+  original selection; matching tiles remain available for normal mode handling.
+- Promoted the 4m generator to the bounded rolling-row architecture used by
+  production 8m terrain. Completed grids now enter the virtual seam mesh and
+  update GUI counters immediately; completed rows are edge/corner merged,
+  written, and released instead of retaining the full route. Distant Mountain
+  generation now follows the same bounded rule. Added synthetic multi-row
+  seam, output-size, memory-window, and live-counter verification.
+- Made route summaries and Advanced Geo Bias post-processing resolution-aware,
+  including 512x512 reading, resampling, seam merging, and writing for 4m.
+- Terrain generation now detects obsolete `_map.ace` materials embedded in
+  normal `.t` tiles and restores the default `terrain.ace` material and UV
+  state. Terrain coordinates, height/patch data, water flags, world files, and
+  the separate `terrain_maps` PNG overlay remain intact.
+- Renamed the tracked and distributed documentation directory from `docs` to
+  `docsMaster`. Packaging, in-application Help discovery, public links, build
+  notes, synchronized document rules, and the PolyVeg contract path now use
+  the new canonical location.
+- Added a persistent, spatially indexed route OSM working cut. The regional
+  PBF is streamed once, complete geometry is clipped to the buffered union of
+  route terrain tiles, and map/PolyVeg work reuses the compact route source
+  until either the PBF stamp or terrain footprint changes.
+- Replaced the progressively growing route-wide visible-surface overlay with
+  bounded terrain-section stacking. Each section includes a one-foot overlap
+  halo, preserves global draw/source order, and recombines all retained pieces
+  under their original stable source identity before validation and export.
+- Prevented final feature assembly from re-snapping already cleared section
+  geometry across permanent exclusions. Exclusion and overlap tolerances are
+  now verified inside each bounded section, avoiding another route-wide overlay
+  during final validation.
+- PolyVeg route coverage now follows every normal terrain .t tile rather than
+  only object-bearing .w files. Bare visible terrain is exported and plantable;
+  the complete terrain footprint also invalidates incomplete working caches.
+- Renamed Create Map Tiles to Create OSM/Map Tiles, removed the unused 10m
+  counter from the Distant Mountains status column, and repaired invalid
+  exclusion geometry after clipping/buffering before the PolyVeg union.
+- Added a readable, indented OSM/PolyVeg processing section with timestamped
+  stage starts and completions. Long stages print a concise five-minute
+  heartbeat without repeated elapsed-duration text. Counted work now reports
+  ten evenly spaced checkpoints: source-read percentage plus feature count,
+  and completed/total counts for PolyVeg work, exclusions, and GeoPackage output.
+- Added a one-foot terrain-vegetation clearance and common 0.10 m overlay
+  precision to prevent non-noded OSM boundary intersections during final
+  PolyVeg exclusion and visible-layer subtraction.
+- Preserved inner rings while rendering filled OSM map polygons, so river and
+  lake islands remain unpainted instead of being flattened into filled water.
+- Reduced PBF classification overhead by consuming point records for relation
+  integrity without wrapping, validating, styling, or exporting unused point
+  geometry. Route rejection now precedes expensive topology repair.
+- Restored the faster route-wide PolyVeg stacking algorithm after testing showed
+  that rebuilding local candidate unions became progressively slower on dense routes.
+- Retained the simple worldwide Geofabrik model: select the smallest single
+  official regional extract covering the route, then build map tiles and the
+  validated PolyVeg contract directly from that source.
+- Replaced the remaining native Windows message boxes with SCO LIDEX-styled
+  information, warning, error, and confirmation dialogs. Popup colors,
+  typography, spacing, buttons, sounds, and owner-centered behavior now match
+  the main application and its existing Help, Contact, and cache windows.
+- Replaced forest-polygons.geojson with schemaVersion 2
+  osm_data\polyveg-polygons.geojson. Twelve canonical rural categories are
+  exported as final mutually exclusive surfaces using the shared F3/LIDEX RGB
+  palette, exact OSM key=value style IDs, map draw order, and stable identity.
+- Carves permanent building, developed/urban, road, railway, trail, open-water,
+  waterway-clearance, and bare-ground exclusions from every category. Wetland
+  and agriculture remain plantable categories rather than self-exclusions.
+- Validates required properties, EPSG:4326, polygon-only non-empty geometry,
+  category overlap, permanent-exclusion intersections, and manifest counts
+  before atomically promoting the GeoPackage, manifest, polygons, and
+  exclusions. The obsolete forest output is removed after successful handoff.
+
 v1.200
 ------
 - Refined the standard-projection calibration from 16m east / 16m south to the
@@ -82,7 +175,7 @@ v1.200
 - Added non-overlapping interface audio for button presses, checkbox/radio
   selections, ordinary status changes, successful Scan/Run completion, and
   failure/error/abort indications.
-- Assigned SCOprogress to ordinary status messages and SCOsuccess to successful
+- Assigned SCOpluck to ordinary status messages and SCOsuccess to successful
   Scan and Run completion.
   All supplied WAV assets are retained in source and distribution output.
 - Expanded the center message panel to report Scan, terrain-source, DM, OSM
@@ -151,7 +244,7 @@ v1.100
 - Added GEOMETRY_PLACEMENT_CORRECTION.txt with the source comparison and
   technical explanation.
 - Aligned the Windows executable file and product metadata with version 1.100.
-- Restored a tracked and distributed docs folder, added a GitHub Markdown
+- Maintained the tracked and distributed docsMaster folder, added a GitHub Markdown
   README, and expanded the v1.000/v1.100 release highlights.
 
 v1.000

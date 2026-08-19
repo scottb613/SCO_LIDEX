@@ -56,6 +56,9 @@ internal sealed partial class TopoForm : Form
     private readonly CheckBox createMosaicTiles = new();
     private readonly CheckBox cleanTileTemplate = new();
     private readonly CheckBox scanOverride = new();
+    private readonly CheckBox enableHd4mTiles = new();
+    private readonly CheckBox enableHdMapTiles = new();
+    private readonly ToolTip optionToolTip = new();
     private readonly RadioButton normalOutput = new();
     private readonly RadioButton experimentalOutput = new();
     private readonly RadioButton existingTilesCoverage = new();
@@ -105,6 +108,7 @@ internal sealed partial class TopoForm : Form
     private CancellationTokenSource? scanCancellation;
     private bool scanPassed;
     private bool scanLocked;
+    private bool terrainResolutionForceApproved;
     private Program.ScanSummary? lastScanSummary;
     private TextWriter? previousOut;
     private TextWriter? previousError;
@@ -272,6 +276,14 @@ internal sealed partial class TopoForm : Form
         trackDatabaseCoverage.CheckedChanged += (_, _) => UpdateRadiusState();
         textFileCoverage.CheckedChanged += (_, _) => UpdateRadiusState();
         distantMountains.CheckedChanged += (_, _) => loTileRadius.Enabled = distantMountains.Checked;
+        enableHd4mTiles.CheckedChanged += (_, _) =>
+        {
+            if (!enableHd4mTiles.Checked)
+            {
+                normalOutput.Checked = true;
+            }
+            SetRunning(runCancellation is not null);
+        };
         experimentalOutput.CheckedChanged += (_, _) =>
         {
             if (experimentalOutput.Checked)
@@ -283,7 +295,11 @@ internal sealed partial class TopoForm : Form
         WireScanInvalidation();
         statusActivityTimer.Tick += StatusActivityTimer_Tick;
         FormClosing += TopoForm_FormClosing;
-        FormClosed += (_, _) => statusActivityTimer.Dispose();
+        FormClosed += (_, _) =>
+        {
+            statusActivityTimer.Dispose();
+            optionToolTip.Dispose();
+        };
         routePathText.Text = LoadLastRoutePath();
         ResetStatus();
         SetRunning(false);
@@ -441,8 +457,10 @@ internal sealed partial class TopoForm : Form
         createRouteTiles.AutoSize = true;
         createRouteTiles.Checked = true;
         distantMountains.Text = "Create DM Tiles";
+        distantMountains.Checked = true;
         distantMountains.AutoSize = true;
-        createMapTiles.Text = "Create Map Tiles";
+        createMapTiles.Text = "Create OSM/Map Tiles";
+        createMapTiles.Checked = true;
         createMapTiles.AutoSize = true;
         createMapTiles.Enabled = true;
         createMosaicTiles.Text = "Create Mosaic Tiles";
@@ -452,6 +470,30 @@ internal sealed partial class TopoForm : Form
         cleanTileTemplate.AutoSize = true;
         scanOverride.Text = "Scan Override";
         scanOverride.AutoSize = true;
+        enableHd4mTiles.Text = "Enable HD Mesh Tiles";
+        enableHd4mTiles.AutoSize = true;
+        enableHd4mTiles.Checked = false;
+        enableHdMapTiles.Text = "Enable HD Map Tiles";
+        enableHdMapTiles.AutoSize = true;
+        enableHdMapTiles.Checked = false;
+        optionToolTip.SetToolTip(createRouteTiles,
+            "Create or update selected route terrain tiles.");
+        optionToolTip.SetToolTip(distantMountains,
+            "Create or update selected Distant Mountain tiles.");
+        optionToolTip.SetToolTip(createMapTiles,
+            "Create 2048 x 2048 OSM map tiles.");
+        optionToolTip.SetToolTip(createMosaicTiles,
+            "Not currently available.");
+        optionToolTip.SetToolTip(cleanTileTemplate,
+            "Destructive: rebuild selected terrain from clean templates.");
+        optionToolTip.SetToolTip(scanOverride,
+            "Run without a successful Scan.");
+        optionToolTip.SetToolTip(enableHd4mTiles,
+            "Unlock 4m mesh output; otherwise terrain stays at 8m.");
+        optionToolTip.SetToolTip(enableHdMapTiles,
+            "Create 4096 x 4096 map tiles instead of 2048 x 2048.");
+        optionPanel.Controls.Add(enableHd4mTiles, 1, 2);
+        optionPanel.Controls.Add(enableHdMapTiles, 1, 3);
         createRouteTiles.Margin = new Padding(3, 0, 3, 3);
         cleanTileTemplate.Margin = new Padding(3, 0, 3, 3);
         distantMountains.Margin = new Padding(3, 3, 3, 3);
@@ -570,13 +612,13 @@ internal sealed partial class TopoForm : Form
             ForeColor = TextColor,
         };
 
-        normalOutput.Text = "Normal - 8 m";
+        normalOutput.Text = "Normal - 8m Tiles";
         normalOutput.AutoSize = true;
         normalOutput.Checked = true;
-        normalOutput.Enabled = false;
-        experimentalOutput.Text = "Testing - 4 m";
+        normalOutput.Enabled = true;
+        experimentalOutput.Text = "HD Test - 4m Tiles";
         experimentalOutput.AutoSize = true;
-        experimentalOutput.Enabled = false;
+        experimentalOutput.Enabled = true;
         outputFlow.Controls.Add(normalOutput);
         outputFlow.Controls.Add(experimentalOutput);
         outputBox.Controls.Add(outputFlow);
@@ -733,6 +775,7 @@ internal sealed partial class TopoForm : Form
         AddStatusRow(status, 3, "• 1m", tileOneMeterValue, dmOneMeterValue, indentTitle: true);
         AddStatusRow(status, 4, "• 5m~", tileOprValue, dmOprValue, indentTitle: true);
         AddStatusRow(status, 5, "• 10m", tileTenMeterValue, dmTenMeterValue, indentTitle: true);
+        dmTenMeterValue.Visible = false;
         AddStatusRow(status, 6, "• 30m (global)", tileGlobalValue, dmGlobalValue, indentTitle: true);
         AddStatusRow(status, 7, "Skip", tileSkippedValue, dmSkippedValue);
         AddStatusRow(status, 8, "Fail", tileFailuresValue, dmFailuresValue);
@@ -850,7 +893,7 @@ internal sealed partial class TopoForm : Form
         using Image? contactImage = LoadContentImage("Contact.png");
         if (contactImage is null)
         {
-            MessageBox.Show(this, "Could not find Contact.png.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            StyledMessageDialog.Show(this, "Could not find Contact.png.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -891,17 +934,17 @@ internal sealed partial class TopoForm : Form
         string[] candidates =
         [
             Path.Combine(AppContext.BaseDirectory, "INSTRUCTIONS.txt"),
-            Path.Combine(AppContext.BaseDirectory, "docs", "INSTRUCTIONS.txt"),
+            Path.Combine(AppContext.BaseDirectory, "docsMaster", "INSTRUCTIONS.txt"),
             Path.Combine(AppContext.BaseDirectory, "..", "INSTRUCTIONS.txt"),
-            Path.Combine(AppContext.BaseDirectory, "..", "docs", "INSTRUCTIONS.txt"),
+            Path.Combine(AppContext.BaseDirectory, "..", "docsMaster", "INSTRUCTIONS.txt"),
             Path.Combine(Environment.CurrentDirectory, "INSTRUCTIONS.txt"),
-            Path.Combine(Environment.CurrentDirectory, "docs", "INSTRUCTIONS.txt"),
+            Path.Combine(Environment.CurrentDirectory, "docsMaster", "INSTRUCTIONS.txt"),
         ];
 
         string? helpPath = candidates.Select(Path.GetFullPath).FirstOrDefault(File.Exists);
         if (helpPath is null)
         {
-            MessageBox.Show(this, "Could not find INSTRUCTIONS.txt.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            StyledMessageDialog.Show(this, "Could not find INSTRUCTIONS.txt.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -911,7 +954,7 @@ internal sealed partial class TopoForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Could not open INSTRUCTIONS.txt:{Environment.NewLine}{ex.Message}", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            StyledMessageDialog.Show(this, $"Could not open INSTRUCTIONS.txt:{Environment.NewLine}{ex.Message}", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
@@ -1105,18 +1148,119 @@ internal sealed partial class TopoForm : Form
         return new Font("Segoe UI Semibold", size, FontStyle.Bold);
     }
 
-    // Scan is intentionally read-only. A passing scan locks the current settings
-    // so Run uses the same route/selection that was validated.
+    private bool EnsureTerrainResolutionCompatibility(
+        string routePath,
+        out string logEntry)
+    {
+        logEntry = "";
+        Program.TerrainOutputResolution selectedResolution =
+            experimentalOutput.Checked
+                ? Program.TerrainOutputResolution.HdTest4m
+                : Program.TerrainOutputResolution.Normal8m;
+        Program.TerrainResolutionInspection inspection;
+        try
+        {
+            inspection = Program.InspectTerrainResolutions(
+                routePath, selectedResolution);
+        }
+        catch (Exception ex)
+        {
+            StyledMessageDialog.Show(
+                this,
+                $"Terrain resolution could not be inspected:\n\n{ex.Message}",
+                "SCO LIDEX - Terrain Resolution",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return false;
+        }
+
+        if (inspection.UnrecognizedTiles.Count > 0)
+        {
+            string details = string.Join(
+                Environment.NewLine,
+                inspection.UnrecognizedTiles.Take(12)
+                    .Select(tile => $"  • {tile.TileName}: {tile.Detail}"));
+            string remainder = inspection.UnrecognizedTiles.Count > 12
+                ? $"{Environment.NewLine}  • ...and {inspection.UnrecognizedTiles.Count - 12:N0} more"
+                : "";
+            StyledMessageDialog.Show(
+                this,
+                $"LIDEX cannot safely determine the resolution of " +
+                $"{inspection.UnrecognizedTiles.Count:N0} terrain tile(s):\n\n" +
+                details + remainder + "\n\nRepair or replace these tiles before Scan. " +
+                "No files were changed.",
+                "SCO LIDEX - Terrain Resolution Stopped",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return false;
+        }
+
+        string selectedLabel = Program.TerrainOutputLabel(selectedResolution);
+        if (inspection.MismatchedTiles.Count == 0)
+        {
+            terrainResolutionForceApproved = false;
+            logEntry =
+                $"Terrain resolution preflight: {inspection.MatchingTiles:N0} route tile(s) match {selectedLabel}." +
+                Environment.NewLine + Environment.NewLine;
+            return true;
+        }
+
+        string mismatchDetails = string.Join(
+            Environment.NewLine,
+            inspection.MismatchedTiles.Take(12)
+                .Select(tile => $"  • {tile.TileName}: {tile.DetectedLabel}"));
+        string mismatchRemainder = inspection.MismatchedTiles.Count > 12
+            ? $"{Environment.NewLine}  • ...and {inspection.MismatchedTiles.Count - 12:N0} more"
+            : "";
+        DialogResult confirm = StyledMessageDialog.Show(
+            this,
+            $"The route contains {inspection.MismatchedTiles.Count:N0} terrain tile(s) " +
+            $"that do not match the selected output:\n\n" +
+            $"Selected: {selectedLabel}\n\n" + mismatchDetails + mismatchRemainder +
+            "\n\nMixed 8m and 4m terrain is not permitted. If you continue, Run will " +
+            $"force every mismatched tile to {selectedLabel}. Its incompatible " +
+            "height grid will be rebuilt in place; terrain coordinates, textures, " +
+            "world files, and route coverage will be preserved. Scan itself will " +
+            "not change the route.\n\n" +
+            "This route-wide correction applies regardless of the current mode or " +
+            "coverage selection. Create Route Tiles and Use Route Tiles will be selected.\n\n" +
+            "Proceed?",
+            "SCO LIDEX - Terrain Resolution Mismatch",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+        if (confirm != DialogResult.Yes)
+        {
+            return false;
+        }
+
+        createRouteTiles.Checked = true;
+        existingTilesCoverage.Checked = true;
+        terrainResolutionForceApproved = true;
+        logEntry =
+            $"Terrain resolution preflight: approved route-wide forcing of " +
+            $"{inspection.MismatchedTiles.Count:N0} mismatched tile(s) to {selectedLabel}. " +
+            "Scan remains read-only; Run will rebuild the mismatches." +
+            Environment.NewLine + Environment.NewLine;
+        return true;
+    }
+
+    // Scan is read-only after the explicit route-wide resolution preflight.
+    // A passing scan locks the settings so Run uses the validated selection.
     private async void Scan_Click(object? sender, EventArgs e)
     {
         string routePath = NormalizeRoutePath(routePathText.Text);
         if (string.IsNullOrWhiteSpace(routePath) || !Directory.Exists(routePath))
         {
-            MessageBox.Show(this, "Select a valid route folder first.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            StyledMessageDialog.Show(this, "Select a valid route folder first.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
         routePathText.Text = routePath;
+        if (!EnsureTerrainResolutionCompatibility(routePath, out string resolutionLog))
+        {
+            return;
+        }
+
         operationFailed = false;
         SaveLastRoutePath(routePath);
         logText.Clear();
@@ -1131,6 +1275,7 @@ internal sealed partial class TopoForm : Form
         previousError = Console.Error;
         logFileWriter = OpenLogFile();
         WriteRunSettingsHeader(routePath, "Scan");
+        AppendLog(resolutionLog);
         using TextWriter writer = new UiTextWriter(AppendLog);
         Console.SetOut(writer);
         Console.SetError(writer);
@@ -1141,13 +1286,16 @@ internal sealed partial class TopoForm : Form
                 CreateRouteTiles: createRouteTiles.Checked,
                 CreateDistantMountains: distantMountains.Checked,
                 CreateMapTiles: createMapTiles.Checked,
+                HdMapTiles: enableHdMapTiles.Checked,
                 MarkerCoverage: markerCoverage.Checked,
                 TrackDatabaseCoverage: trackDatabaseCoverage.Checked,
                 KmlCoverage: kmlCoverage.Checked,
                 TextFileCoverage: textFileCoverage.Checked,
                 CleanTileWipe: cleanTileTemplate.Checked,
                 TerrainRadius: (int)terrainRadius.Value,
-                LoTileRadius: (int)loTileRadius.Value);
+                LoTileRadius: (int)loTileRadius.Value,
+                Hd4mOutput: experimentalOutput.Checked,
+                ForceResolutionMismatches: terrainResolutionForceApproved);
 
             Program.ScanSummary summary = await Task.Run(() => Program.ScanRouteAsync(routePath, options, scanCancellation.Token));
             routeStatus.Total = summary.RouteTileTotal;
@@ -1196,27 +1344,35 @@ internal sealed partial class TopoForm : Form
     {
         if (!scanPassed && !scanOverride.Checked)
         {
-            MessageBox.Show(this, "Run requires a passing Scan first.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            StyledMessageDialog.Show(this, "Run requires a passing Scan first.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
         string routePath = NormalizeRoutePath(routePathText.Text);
+        string runResolutionLog = "";
         if (string.IsNullOrWhiteSpace(routePath) || !Directory.Exists(routePath))
         {
-            MessageBox.Show(this, "Select a valid route folder first.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            StyledMessageDialog.Show(this, "Select a valid route folder first.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        routePathText.Text = routePath;
+        if (scanOverride.Checked &&
+            !EnsureTerrainResolutionCompatibility(routePath, out runResolutionLog))
+        {
             return;
         }
 
         if (experimentalOutput.Checked)
         {
-            DialogResult experimentalConfirm = MessageBox.Show(
+            DialogResult experimentalConfirm = StyledMessageDialog.Show(
                 this,
-                "Create the EXPERIMENTAL 4m terrain test?" + Environment.NewLine + Environment.NewLine +
-                "Every selected normal terrain tile will be rebuilt as a 512x512, 4m grid. " +
+                "Create HD Test - 4m Tiles?" + Environment.NewLine + Environment.NewLine +
+                "Every selected normal terrain tile requiring generation will be built as a 512x512, 4m grid. " +
                 "Distant Mountains and maps will run when their Create options are checked. " +
                 "The 4m terrain format requires the matching Open Rails development build." +
                 Environment.NewLine + Environment.NewLine + "Use only on a backed-up test route.",
-                "SCO LIDEX - Experimental 4m Test",
+                "SCO LIDEX - HD Test Terrain",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Warning);
             if (experimentalConfirm != DialogResult.OK)
@@ -1225,7 +1381,6 @@ internal sealed partial class TopoForm : Form
             }
         }
 
-        routePathText.Text = routePath;
         operationFailed = false;
         SetOperationMessage("STARTING OPERATION");
         SaveLastRoutePath(routePath);
@@ -1236,6 +1391,7 @@ internal sealed partial class TopoForm : Form
         previousError = Console.Error;
         logFileWriter = OpenLogFile();
         WriteRunSettingsHeader(routePath, "Run");
+        AppendLog(runResolutionLog);
         using TextWriter writer = new UiTextWriter(AppendLog);
         Console.SetOut(writer);
         Console.SetError(writer);
@@ -1281,14 +1437,14 @@ internal sealed partial class TopoForm : Form
         int northSouthShift = (int)postNorthSouthShiftValue.Value;
         if (eastWestShift == 0 && northSouthShift == 0)
         {
-            MessageBox.Show(this, "Set an Advanced Geo Bias offset before committing Post Processing.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            StyledMessageDialog.Show(this, "Set an Advanced Geo Bias offset before committing Post Processing.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
         string routePath = NormalizeRoutePath(routePathText.Text);
         if (string.IsNullOrWhiteSpace(routePath) || !Directory.Exists(routePath))
         {
-            MessageBox.Show(this, "Select a valid route folder first.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            StyledMessageDialog.Show(this, "Select a valid route folder first.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -1301,11 +1457,11 @@ internal sealed partial class TopoForm : Form
                     : "no selected terrain grids";
         if (!createRouteTiles.Checked && !distantMountains.Checked)
         {
-            MessageBox.Show(this, "Select Create Route Tiles and/or Create DM Tiles before committing.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            StyledMessageDialog.Show(this, "Select Create Route Tiles and/or Create DM Tiles before committing.", "SCO LIDEX", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
-        DialogResult confirm = MessageBox.Show(
+        DialogResult confirm = StyledMessageDialog.Show(
             this,
             $"Commit Post Processing shift using existing terrain?{Environment.NewLine}{Environment.NewLine}East/West: {eastWestShift} m{Environment.NewLine}North/South: {northSouthShift} m{Environment.NewLine}{Environment.NewLine}This resamples and rewrites {targetText}. Back up the route first.",
             "SCO LIDEX",
@@ -1340,7 +1496,8 @@ internal sealed partial class TopoForm : Form
                 KmlCoverage: kmlCoverage.Checked,
                 TextFileCoverage: textFileCoverage.Checked,
                 TerrainRadius: (int)terrainRadius.Value,
-                LoTileRadius: (int)loTileRadius.Value);
+                LoTileRadius: (int)loTileRadius.Value,
+                Hd4mOutput: experimentalOutput.Checked);
 
             await Task.Run(() => Program.PostProcessTerrainShiftAsync(routePath, options, eastWestShift, northSouthShift, runCancellation.Token));
         }
@@ -1389,7 +1546,7 @@ internal sealed partial class TopoForm : Form
             string selectedPath = NormalizeRoutePath(dialog.SelectedPath);
             if (!IsValidRouteFolder(selectedPath))
             {
-                MessageBox.Show(
+                StyledMessageDialog.Show(
                     this,
                     "The selected folder is not an Open Rails route folder. Select a folder containing a .trk file.",
                     "SCO LIDEX",
@@ -1404,7 +1561,7 @@ internal sealed partial class TopoForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(
+            StyledMessageDialog.Show(
                 this,
                 $"Windows could not open the route folder browser.{Environment.NewLine}{Environment.NewLine}{ex.Message}{Environment.NewLine}{Environment.NewLine}You can still type or paste the route path.",
                 "SCO LIDEX",
@@ -1625,7 +1782,17 @@ internal sealed partial class TopoForm : Form
 
         if (experimentalOutput.Checked)
         {
-            args.Add("--experimental-4m-test");
+            args.Add("--hd-4m");
+        }
+
+        if (enableHdMapTiles.Checked)
+        {
+            args.Add("--hd-map-tiles");
+        }
+
+        if (terrainResolutionForceApproved)
+        {
+            args.Add("--force-terrain-resolution");
         }
 
         int eastWestBias = (int)postEastWestShiftValue.Value;
@@ -1669,8 +1836,10 @@ internal sealed partial class TopoForm : Form
             $"Mode: {(overwriteMode.Checked ? "Overwrite" : "Append")}{Environment.NewLine}" +
             $"Create Route Tiles: {YesNo(createRouteTiles.Checked)}{Environment.NewLine}" +
             $"Create Distant Mountains: {YesNo(distantMountains.Checked)}{Environment.NewLine}" +
-            $"Create Map Tiles: {YesNo(createMapTiles.Checked)}{Environment.NewLine}" +
-            $"Terrain Output: {(experimentalOutput.Checked ? "EXPERIMENTAL - 4m TEST" : "Normal - 8m")}{Environment.NewLine}" +
+            $"Create OSM/Map Tiles: {YesNo(createMapTiles.Checked)}{Environment.NewLine}" +
+            $"Enable HD Map Tiles: {YesNo(enableHdMapTiles.Checked)}{Environment.NewLine}" +
+            $"Enable HD Mesh Tiles: {YesNo(enableHd4mTiles.Checked)}{Environment.NewLine}" +
+            $"Terrain Output: {(experimentalOutput.Checked ? "HD Test - 4m Tiles" : "Normal - 8m Tiles")}{Environment.NewLine}" +
             $"Global DEM fallback: 30m (global) - Copernicus DEM GLO-30 Public, anonymous AWS Open Data, low resolution DSM{Environment.NewLine}" +
             $"Clean Tile Wipe: {YesNo(cleanTileTemplate.Checked)}{Environment.NewLine}" +
             $"Scan Override: {YesNo(scanOverride.Checked)}{Environment.NewLine}" +
@@ -1766,6 +1935,8 @@ internal sealed partial class TopoForm : Form
         overwriteMode.Enabled = !locked;
         createRouteTiles.Enabled = !locked;
         createMapTiles.Enabled = !locked;
+        enableHd4mTiles.Enabled = !locked;
+        enableHdMapTiles.Enabled = !locked;
         cleanTileTemplate.Enabled = !locked;
         scanOverride.Enabled = !busy && !scanLocked;
         existingTilesCoverage.Enabled = !locked;
@@ -1776,8 +1947,8 @@ internal sealed partial class TopoForm : Form
         terrainRadius.Enabled = !locked && UsesTileRadius();
         distantMountains.Enabled = !locked;
         loTileRadius.Enabled = !locked && distantMountains.Checked;
-        normalOutput.Enabled = false;
-        experimentalOutput.Enabled = false;
+        normalOutput.Enabled = !locked && enableHd4mTiles.Checked;
+        experimentalOutput.Enabled = !locked && enableHd4mTiles.Checked;
         postEastWestShiftSlider.Enabled = !locked;
         postEastWestShiftValue.Enabled = !locked;
         postNorthSouthShiftSlider.Enabled = !locked;
@@ -1800,6 +1971,7 @@ internal sealed partial class TopoForm : Form
     {
         scanPassed = false;
         lastScanSummary = null;
+        terrainResolutionForceApproved = false;
         scanLocked = false;
         SetRunning(runCancellation is not null);
     }
@@ -1814,7 +1986,7 @@ internal sealed partial class TopoForm : Form
         if (runCancellation is not null || scanCancellation is not null)
         {
             e.Cancel = true;
-            MessageBox.Show(
+            StyledMessageDialog.Show(
                 this,
                 "Abort the active operation before exiting SCO LIDEX.",
                 "SCO LIDEX",
@@ -1832,7 +2004,7 @@ internal sealed partial class TopoForm : Form
         catch (Exception ex)
         {
             e.Cancel = true;
-            MessageBox.Show(
+            StyledMessageDialog.Show(
                 this,
                 $"SCO LIDEX could not inspect registered cache data:\n\n{ex.Message}",
                 "SCO LIDEX - Cache Data",
@@ -1863,7 +2035,7 @@ internal sealed partial class TopoForm : Form
             catch (Exception ex)
             {
                 e.Cancel = true;
-                MessageBox.Show(
+                StyledMessageDialog.Show(
                     this,
                     $"The selected cache data could not be purged:\n\n{ex.Message}",
                     "SCO LIDEX - Cache Data",
@@ -1904,6 +2076,8 @@ internal sealed partial class TopoForm : Form
         createRouteTiles.CheckedChanged += invalidate;
         createMapTiles.CheckedChanged += invalidate;
         distantMountains.CheckedChanged += invalidate;
+        enableHd4mTiles.CheckedChanged += invalidate;
+        enableHdMapTiles.CheckedChanged += invalidate;
         normalOutput.CheckedChanged += invalidate;
         experimentalOutput.CheckedChanged += invalidate;
         cleanTileTemplate.CheckedChanged += invalidate;
@@ -2391,7 +2565,7 @@ internal sealed partial class TopoForm : Form
         }
     }
 
-    [GeneratedRegex(@"^\[(?<index>[\d,]+)/(?<total>[\d,]+)\]", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^\[(?:4m\s+)?(?<index>[\d,]+)/(?<total>[\d,]+)\]", RegexOptions.IgnoreCase)]
     private static partial Regex RouteTileRegex();
 
     [GeneratedRegex(@"Progress:\s+(?<processed>[\d,]+)/(?<total>[\d,]+)\s+processed.*?(?<generated>[\d,]+)\s+generated,\s+(?<skipped>[\d,]+)\s+skipped,\s+(?<failed>[\d,]+)\s+failed", RegexOptions.IgnoreCase)]
@@ -2417,5 +2591,15 @@ internal sealed partial class TopoForm : Form
 
     [GeneratedRegex(@"Source use summary:\s+tiles using 1m=(?<primary>[\d,]+),\s+5m~=(?<opr>[\d,]+),\s+10m=(?<ten>[\d,]+),\s+30m \(global\)=(?<global>[\d,]+)", RegexOptions.IgnoreCase)]
     private static partial Regex SourceUseSummaryRegex();
+
+    internal static bool RecognizesRouteTileProgressForProbe(string line)
+    {
+        return RouteTileRegex().IsMatch(line);
+    }
+
+    internal static bool RecognizesRouteSourceProgressForProbe(string line)
+    {
+        return RouteSourceSamplesRegex().IsMatch(line);
+    }
 
 }

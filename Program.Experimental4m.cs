@@ -1,5 +1,5 @@
-// SCO LIDEX - isolated experimental 4 m normal-terrain test writer.
-// This deliberately avoids changing the established 8 m production writer.
+// SCO LIDEX - production HD Test 4 m normal-terrain writer.
+// Uses the same bounded rolling-row architecture as normal 8 m terrain.
 
 using System;
 using System.Collections.Generic;
@@ -24,6 +24,7 @@ internal static partial class Program
         double sourceBiasEastMeters,
         double sourceBiasNorthMeters,
         DemSourcePolicy sourcePolicy,
+        bool overwriteFlag,
         CancellationToken cancellationToken)
     {
         List<TerrainTile> tiles = selectedTiles
@@ -33,7 +34,7 @@ internal static partial class Program
 
         if (tiles.Count == 0)
         {
-            Console.WriteLine("Error: experimental 4m test found no normal terrain tiles.");
+            Console.WriteLine("Error: HD Test - 4m Tiles found no normal terrain tiles.");
             return false;
         }
 
@@ -43,25 +44,42 @@ internal static partial class Program
             .ToList();
         if (unmapped.Count > 0)
         {
-            Console.WriteLine($"Error: experimental 4m test requires every route terrain tile to map to a world tile; unmapped={unmapped.Count:N0}.");
+            Console.WriteLine($"Error: HD Test - 4m Tiles require every route terrain tile to map to a world tile; unmapped={unmapped.Count:N0}.");
             return false;
         }
 
         Console.WriteLine();
         Console.WriteLine("=========================================");
-        Console.WriteLine(" EXPERIMENTAL 4m NORMAL TERRAIN TEST ");
+        Console.WriteLine(" HD TEST - 4m TILES ");
         Console.WriteLine("=========================================");
         Console.WriteLine($"Selected normal terrain tiles: {tiles.Count:N0}");
         Console.WriteLine("Height grid: 512x512, 4m posts, 524,288-byte _y.raw");
-        Console.WriteLine("Write policy: generate every selected tile first; write nothing if any selected tile fails.");
+        Console.WriteLine("Write policy: merge and write completed terrain rows continuously; retain only the active seam window.");
 
-        List<ExperimentalGeneratedTile> generated = new(tiles.Count);
+        RollingExperimentalTerrainWriter rollingWriter = new(outputDir);
+        int generatedCount = 0;
+        int skipped = 0;
+        int failed = 0;
+        SortedSet<string> retryableFailedTileNames = new(StringComparer.OrdinalIgnoreCase);
         for (int index = 0; index < tiles.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             TerrainTile tile = tiles[index];
             WorldTile worldTile = tile.WorldTile!;
-            Console.WriteLine($"\n[4m {index + 1:N0}/{tiles.Count:N0}] {tile.TileFile.Name}");
+            int tileNumber = index + 1;
+            Console.WriteLine($"\n[4m {tileNumber:N0}/{tiles.Count:N0}] {tile.TileFile.Name} ({tiles.Count - tileNumber:N0} remaining)");
+            rollingWriter.FlushRowsBefore(worldTile.Z - 1);
+            NormalizeTerrainMaterialFileIfLegacyMap(tile);
+
+            RawGridStats? existingStats = TryGetRawGridStats(
+                tile.RawHeightPath, ExperimentalRawGridSize);
+            if (!overwriteFlag && existingStats is not null && !existingStats.IsEmpty)
+            {
+                skipped++;
+                Console.WriteLine($"  -> Skipped: 4m raw grid already has {existingStats.ValidCount:N0} height samples.");
+                PrintProgressCheckpoint(tileNumber, tiles.Count, generatedCount, skipped, failed);
+                continue;
+            }
 
             try
             {
@@ -75,9 +93,10 @@ internal static partial class Program
                 Console.WriteLine(result.GlobalSamplesUsed > 0
                     ? "STATUS: TILES - GLOBAL - LOW RES"
                     : "STATUS: TILES - US - HIGH RES");
-                generated.Add(new ExperimentalGeneratedTile(tile, result.Heights));
+                rollingWriter.Add(new ExperimentalGeneratedTile(tile, result.Heights));
+                generatedCount++;
                 Console.WriteLine(
-                    $"  -> EXPERIMENTAL 4m OUTPUT prepared; sources " +
+                    $"  -> Source samples used: " +
                     $"{PrimaryDemLabel}={result.PrimarySamplesUsed:N0}, " +
                     $"{IntermediateDemLabel}={result.IntermediateSamplesUsed:N0}, " +
                     $"{FallbackDemLabel}={result.FallbackSamplesUsed:N0}, " +
@@ -86,39 +105,33 @@ internal static partial class Program
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Console.WriteLine($"  -> Experimental generation failed: {ex.Message}");
-                Console.WriteLine("Error: at least one 4m tile failed; no experimental terrain files were written.");
-                return false;
+                failed++;
+                retryableFailedTileNames.Add(GetTerrainTileBaseName(tile));
+                MarkTerrainTileForAppendRetry(tile, ExperimentalRawGridSize);
+                Console.WriteLine($"  -> HD Test 4m generation failed: {ex.Message}");
             }
+
+            PrintProgressCheckpoint(tileNumber, tiles.Count, generatedCount, skipped, failed);
         }
 
-        Dictionary<(int X, int Z), short[,]> grids = generated.ToDictionary(
-            item => (item.Tile.WorldTile!.X, item.Tile.WorldTile.Z),
-            item => item.Heights);
-        MergeExperimentalSharedEdges(grids);
-
-        Dictionary<string, float[,]> patchHeights = new(StringComparer.OrdinalIgnoreCase);
-        Dictionary<(int X, int Z), float[,]> patchHeightsByWorld = [];
-        foreach (ExperimentalGeneratedTile item in generated)
+        try
         {
-            float[,] patches = BuildExperimentalPatchHeights(item.Heights);
-            patchHeights[item.Tile.TileFile.Name] = patches;
-            patchHeightsByWorld[(item.Tile.WorldTile!.X, item.Tile.WorldTile.Z)] = patches;
+            rollingWriter.FlushAll();
         }
-        MergeSharedPatchEdges(patchHeightsByWorld);
-        MergeSharedPatchCorners(patchHeightsByWorld);
-
-        Directory.CreateDirectory(outputDir);
-        for (int index = 0; index < generated.Count; index++)
+        catch (Exception ex)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            ExperimentalGeneratedTile item = generated[index];
-            WriteExperimental4mTile(outputDir, item, patchHeights[item.Tile.TileFile.Name]);
-            Console.WriteLine($"  [write {index + 1:N0}/{generated.Count:N0}] {item.Tile.TileFile.Name}: EXPERIMENTAL 4m OUTPUT");
+            Console.WriteLine($"Error: failed while writing HD Test 4m terrain rows: {ex.Message}");
+            return false;
         }
 
-        Console.WriteLine($"\nEXPERIMENTAL 4m OUTPUT complete: {generated.Count:N0} normal terrain tile(s).");
-        return true;
+        Console.WriteLine(
+            $"HD Test rolling writer peak memory window: " +
+            $"{rollingWriter.PeakPendingCount:N0} tile grid(s).");
+        Console.WriteLine(
+            $"\nDone. Generated={generatedCount:N0}, skipped={skipped:N0}, " +
+            $"failed={failed:N0}, total={tiles.Count:N0}.");
+        PrintFailedTileTextFileBlock(retryableFailedTileNames);
+        return failed == 0;
     }
 
     private static void WriteExperimental4mTile(
@@ -128,6 +141,8 @@ internal static partial class Program
     {
         TerrainSampleEncoding encoding = CalculateSampleEncoding(generated.Heights);
         byte[] tileBytes = File.ReadAllBytes(generated.Tile.TileFile.FullName);
+        tileBytes = NormalizeLegacyMapTerrainMaterial(
+            tileBytes, generated.Tile.TileFile.Name, out _);
         try
         {
             PatchTerrainTileHeights(tileBytes, patchHeights, encoding);
@@ -135,7 +150,7 @@ internal static partial class Program
         catch (InvalidOperationException)
         {
             FileInfo template = FindGeneratedTerrainTileTemplate()
-                ?? throw new InvalidOperationException("could not find a clean terrain .t template for experimental output");
+                ?? throw new InvalidOperationException("could not find a clean terrain .t template for HD Test 4m output");
             tileBytes = CreateTerrainTileFromTemplate(
                 template,
                 Path.GetFileNameWithoutExtension(generated.Tile.TileFile.Name).ToLowerInvariant());
@@ -179,7 +194,7 @@ internal static partial class Program
         int width = heights.GetLength(1);
         if (height != ExperimentalRawGridSize || width != ExperimentalRawGridSize)
         {
-            throw new InvalidOperationException($"experimental raw grid is {width}x{height}, expected 512x512");
+            throw new InvalidOperationException($"HD Test raw grid is {width}x{height}, expected 512x512");
         }
 
         byte[] bytes = new byte[width * height * sizeof(ushort)];
@@ -299,4 +314,140 @@ internal static partial class Program
 
     private sealed record ExperimentalGeneratedTile(TerrainTile Tile, short[,] Heights);
     private sealed record ExperimentalCornerRef(short[,] Grid, int X, int Y);
+
+    private sealed class RollingExperimentalTerrainWriter
+    {
+        private readonly string outputDir;
+        private readonly Dictionary<(int X, int Z), ExperimentalGeneratedTile> pending = [];
+
+        public RollingExperimentalTerrainWriter(string outputDir)
+        {
+            this.outputDir = outputDir;
+            Directory.CreateDirectory(outputDir);
+        }
+
+        public int PeakPendingCount { get; private set; }
+
+        public void Add(ExperimentalGeneratedTile generated)
+        {
+            WorldTile worldTile = generated.Tile.WorldTile
+                ?? throw new InvalidOperationException(
+                    $"Terrain tile {generated.Tile.TileFile.Name} is not matched to a world tile.");
+            (int X, int Z) key = (worldTile.X, worldTile.Z);
+            if (!pending.TryAdd(key, generated))
+            {
+                throw new InvalidOperationException(
+                    $"duplicate generated world tile coordinate X={key.X}, Z={key.Z}");
+            }
+
+            MergeWithPendingNeighbors(key, generated.Heights);
+            PeakPendingCount = Math.Max(PeakPendingCount, pending.Count);
+        }
+
+        public void FlushRowsBefore(int minZToKeep)
+        {
+            FlushRows(pending.Keys
+                .Select(key => key.Z)
+                .Distinct()
+                .Where(z => z < minZToKeep)
+                .OrderBy(z => z)
+                .ToList());
+        }
+
+        public void FlushAll()
+        {
+            FlushRows(pending.Keys
+                .Select(key => key.Z)
+                .Distinct()
+                .OrderBy(z => z)
+                .ToList());
+        }
+
+        private void MergeWithPendingNeighbors((int X, int Z) key, short[,] heights)
+        {
+            if (pending.TryGetValue((key.X - 1, key.Z), out ExperimentalGeneratedTile? west))
+            {
+                MergeVerticalEdge(west.Heights, heights);
+            }
+
+            if (pending.TryGetValue((key.X + 1, key.Z), out ExperimentalGeneratedTile? east))
+            {
+                MergeVerticalEdge(heights, east.Heights);
+            }
+
+            if (pending.TryGetValue((key.X, key.Z - 1), out ExperimentalGeneratedTile? south))
+            {
+                MergeHorizontalEdge(south.Heights, heights);
+            }
+
+            if (pending.TryGetValue((key.X, key.Z + 1), out ExperimentalGeneratedTile? north))
+            {
+                MergeHorizontalEdge(heights, north.Heights);
+            }
+        }
+
+        private void FlushRows(IReadOnlyCollection<int> rowsToFlush)
+        {
+            if (rowsToFlush.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<(int X, int Z), short[,]> rawWindow = pending.ToDictionary(
+                item => item.Key, item => item.Value.Heights);
+            MergeExperimentalSharedEdges(rawWindow);
+
+            Dictionary<string, float[,]> patchesByTile =
+                new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<(int X, int Z), float[,]> patchesByWorld = [];
+            foreach (KeyValuePair<(int X, int Z), ExperimentalGeneratedTile> item in pending)
+            {
+                float[,] patches = BuildExperimentalPatchHeights(item.Value.Heights);
+                patchesByTile[item.Value.Tile.TileFile.Name] = patches;
+                patchesByWorld[item.Key] = patches;
+            }
+
+            MergeSharedPatchEdges(patchesByWorld);
+            MergeSharedPatchCorners(patchesByWorld);
+
+            List<(int X, int Z)> keysToFlush = pending.Keys
+                .Where(key => rowsToFlush.Contains(key.Z))
+                .OrderBy(key => key.Z)
+                .ThenBy(key => key.X)
+                .ToList();
+            foreach ((int X, int Z) key in keysToFlush)
+            {
+                ExperimentalGeneratedTile generated = pending[key];
+                WriteExperimental4mTile(
+                    outputDir,
+                    generated,
+                    patchesByTile[generated.Tile.TileFile.Name]);
+                Console.WriteLine(
+                    $"  -> Wrote {generated.Tile.TileFile.Name} from rolling 4m seam window.");
+                pending.Remove(key);
+            }
+        }
+
+        private static void MergeVerticalEdge(short[,] west, short[,] east)
+        {
+            int edge = ExperimentalRawGridSize - 1;
+            for (int y = 0; y < ExperimentalRawGridSize; y++)
+            {
+                short merged = MergeHeights(west[y, edge], east[y, 0]);
+                west[y, edge] = merged;
+                east[y, 0] = merged;
+            }
+        }
+
+        private static void MergeHorizontalEdge(short[,] south, short[,] north)
+        {
+            int edge = ExperimentalRawGridSize - 1;
+            for (int x = 0; x < ExperimentalRawGridSize; x++)
+            {
+                short merged = MergeHeights(south[0, x], north[edge, x]);
+                south[0, x] = merged;
+                north[edge, x] = merged;
+            }
+        }
+    }
 }

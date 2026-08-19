@@ -40,7 +40,6 @@ namespace ORterr;
 internal static partial class Program
 {
     // Evaluation-only switch for the isolated 4 m writer.
-    internal static readonly bool Experimental4mExportEnabled = true;
 
     private const int OrtsRawGridSize = 256;
     private const int LoRawGridSize = 256;
@@ -85,13 +84,16 @@ internal static partial class Program
         bool CreateRouteTiles,
         bool CreateDistantMountains,
         bool CreateMapTiles,
+        bool HdMapTiles,
         bool MarkerCoverage,
         bool TrackDatabaseCoverage,
         bool KmlCoverage,
         bool TextFileCoverage,
         bool CleanTileWipe,
         int TerrainRadius,
-        int LoTileRadius);
+        int LoTileRadius,
+        bool Hd4mOutput,
+        bool ForceResolutionMismatches);
 
     internal sealed record DemSourcePolicy(
         bool UsePrimary,
@@ -128,17 +130,19 @@ internal static partial class Program
         bool KmlCoverage,
         bool TextFileCoverage,
         int TerrainRadius,
-        int LoTileRadius);
+        int LoTileRadius,
+        bool Hd4mOutput);
 
     [STAThread]
     private static void Main(string[] args)
     {
         if (args.Contains("--gui", StringComparer.OrdinalIgnoreCase))
         {
+            ApplicationConfiguration.Initialize();
             using Mutex singleInstance = new(false, @"Local\SCO-LIDEX-GUI");
             if (!singleInstance.WaitOne(0))
             {
-                MessageBox.Show(
+                StyledMessageDialog.Show(
                     "SCO LIDEX is already running.",
                     "SCO LIDEX",
                     MessageBoxButtons.OK,
@@ -148,13 +152,12 @@ internal static partial class Program
 
             try
             {
-                ApplicationConfiguration.Initialize();
                 Application.Run(new TopoForm());
             }
             catch (Exception ex)
             {
                 WriteStartupErrorLog(ex);
-                MessageBox.Show(
+                StyledMessageDialog.Show(
                     $"SCO LIDEX could not start. Details were written to:{Environment.NewLine}{GetStartupErrorLogPath()}",
                     "SCO LIDEX",
                     MessageBoxButtons.OK,
@@ -185,6 +188,24 @@ internal static partial class Program
         if (args.Contains("--route-osm-lifecycle-probe", StringComparer.OrdinalIgnoreCase))
         {
             RunRouteOsmLifecycleProbe();
+            return;
+        }
+
+        if (args.Contains("--styled-message-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            StyledMessageDialog.RunConstructionProbe();
+            return;
+        }
+
+        if (args.Contains("--terrain-resolution-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunTerrainResolutionProbe();
+            return;
+        }
+
+        if (args.Contains("--rolling-terrain-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunRollingTerrainProbe();
             return;
         }
 
@@ -314,17 +335,17 @@ internal static partial class Program
         bool primaryServiceAvailable = args.Contains("--usgs-1m-service-online", StringComparer.OrdinalIgnoreCase);
         bool intermediateServiceAvailable = args.Contains("--usgs-5m-service-online", StringComparer.OrdinalIgnoreCase);
         bool fallbackServiceAvailable = args.Contains("--usgs-10m-service-online", StringComparer.OrdinalIgnoreCase);
+        bool forceTerrainResolution = args.Contains("--force-terrain-resolution", StringComparer.OrdinalIgnoreCase);
         DemSourcePolicy demSources = new(
             !args.Contains("--skip-usgs-1m", StringComparer.OrdinalIgnoreCase),
             !args.Contains("--skip-usgs-5m", StringComparer.OrdinalIgnoreCase),
             !args.Contains("--skip-usgs-10m", StringComparer.OrdinalIgnoreCase),
             !args.Contains("--skip-copernicus", StringComparer.OrdinalIgnoreCase));
-        bool experimental4mTest = args.Contains("--experimental-4m-test", StringComparer.OrdinalIgnoreCase);
-        if (experimental4mTest && !Experimental4mExportEnabled)
-        {
-            Console.WriteLine("Experimental 4m export is deactivated in this build. Normal 8m output remains active.");
-            return;
-        }
+        bool experimental4mTest =
+            args.Contains("--hd-4m", StringComparer.OrdinalIgnoreCase) ||
+            args.Contains("--experimental-4m-test", StringComparer.OrdinalIgnoreCase);
+        bool hdMapTiles = args.Contains("--hd-map-tiles", StringComparer.OrdinalIgnoreCase);
+        MapImageSize = hdMapTiles ? 4096 : 2048;
         int limit = ParseIntOption(args, "--limit", int.MaxValue);
         int terrainRadius = ParseIntOption(args, "--terrain-radius", 0);
         int loTileRadius = ParseIntOption(args, "--lo-radius", 1);
@@ -358,7 +379,8 @@ internal static partial class Program
                 KmlCoverage: kmlCoverage,
                 TextFileCoverage: textFileCoverage,
                 TerrainRadius: terrainRadius,
-                LoTileRadius: loTileRadius);
+                LoTileRadius: loTileRadius,
+                Hd4mOutput: experimental4mTest);
             await PostProcessTerrainShiftAsync(routeDir, options, postShiftEastMeters, postShiftNorthMeters, cancellationToken);
             return;
         }
@@ -374,7 +396,7 @@ internal static partial class Program
         {
             try
             {
-                EnsureMarkerCoverageTiles(routeDir, terrainRadius);
+                EnsureMarkerCoverageTiles(routeDir, terrainRadius, experimental4mTest);
             }
             catch (Exception ex)
             {
@@ -386,7 +408,7 @@ internal static partial class Program
         {
             try
             {
-                EnsureTrackDatabaseCoverageTiles(routeDir, terrainRadius);
+                EnsureTrackDatabaseCoverageTiles(routeDir, terrainRadius, experimental4mTest);
             }
             catch (Exception ex)
             {
@@ -398,7 +420,7 @@ internal static partial class Program
         {
             try
             {
-                EnsureKmlCoverageTiles(routeDir, terrainRadius);
+                EnsureKmlCoverageTiles(routeDir, terrainRadius, experimental4mTest);
             }
             catch (Exception ex)
             {
@@ -410,7 +432,7 @@ internal static partial class Program
         {
             try
             {
-                EnsureTextFileCoverageTiles(routeDir);
+                EnsureTextFileCoverageTiles(routeDir, experimental4mTest);
             }
             catch (Exception ex)
             {
@@ -425,7 +447,56 @@ internal static partial class Program
             return;
         }
 
-        PrintRouteSummary(route!);
+        TerrainOutputResolution requestedTerrainResolution = experimental4mTest
+            ? TerrainOutputResolution.HdTest4m
+            : TerrainOutputResolution.Normal8m;
+        if (createRouteTiles)
+        {
+            TerrainResolutionInspection resolutionInspection =
+                InspectTerrainResolutions(routeDir, requestedTerrainResolution);
+            if (resolutionInspection.UnrecognizedTiles.Count > 0)
+            {
+                Console.WriteLine(
+                    $"Error: {resolutionInspection.UnrecognizedTiles.Count:N0} terrain tile(s) " +
+                    "have an unreadable or unknown resolution; Run stopped before terrain writes.");
+                foreach (TerrainResolutionIssue issue in resolutionInspection.UnrecognizedTiles.Take(40))
+                {
+                    Console.WriteLine($"  {issue.TileName}: {issue.Detail}");
+                }
+
+                return;
+            }
+
+            if (resolutionInspection.MismatchedTiles.Count > 0)
+            {
+                if (!forceTerrainResolution)
+                {
+                    Console.WriteLine(
+                        $"Error: {resolutionInspection.MismatchedTiles.Count:N0} terrain tile(s) " +
+                        $"do not match {TerrainOutputLabel(requestedTerrainResolution)}. " +
+                        "Run Scan and approve route-wide forcing first.");
+                    return;
+                }
+
+                int forced = ResetTerrainResolutionMismatches(
+                    routeDir, resolutionInspection);
+                markerCoverage = false;
+                trackDatabaseCoverage = false;
+                kmlCoverage = false;
+                textFileCoverage = false;
+                Console.WriteLine(
+                    $"Terrain resolution: forced {forced:N0} mismatched tile(s) to " +
+                    $"{TerrainOutputLabel(requestedTerrainResolution)} and queued the complete route for rebuilding.");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"Terrain resolution: all {resolutionInspection.TotalTiles:N0} route tile(s) " +
+                    $"match {TerrainOutputLabel(requestedTerrainResolution)}.");
+            }
+        }
+
+        PrintRouteSummary(route!, requestedTerrainResolution);
         ProductUrlCachePath = Path.Combine(route!.RouteDir, "SCOLIDEX-product-cache.json");
         LoadProductUrlCache(ProductUrlCachePath);
         string outputDir = requestedOutputDir
@@ -514,7 +585,7 @@ internal static partial class Program
         {
             if (inspectOnly)
             {
-                Console.WriteLine("Experimental 4m test: inspect-only Scan uses the normal terrain preflight; no 4m files are written.");
+                Console.WriteLine("HD Test - 4m Tiles: inspect-only Scan uses the terrain preflight; no 4m files are written.");
                 return;
             }
 
@@ -522,7 +593,7 @@ internal static partial class Program
             {
                 if (mapper is null)
                 {
-                    Console.WriteLine("Error: experimental 4m terrain requires route geography.");
+                    Console.WriteLine("Error: HD Test 4m terrain requires route geography.");
                     return;
                 }
 
@@ -534,8 +605,16 @@ internal static partial class Program
                     sourceBiasEastMeters,
                     sourceBiasNorthMeters,
                     demSources,
+                    overwriteFlag,
                     cancellationToken);
                 if (!completed)
+                {
+                    Console.WriteLine("STATUS: FAILURE - TILES");
+                    return;
+                }
+
+                if (!VerifyUniformTerrainResolution(
+                        routeDir, TerrainOutputResolution.HdTest4m))
                 {
                     Console.WriteLine("STATUS: FAILURE - TILES");
                     return;
@@ -613,6 +692,11 @@ internal static partial class Program
                 int tileNumber = tileIndex + 1;
                 int remaining = totalTiles - tileNumber;
                 Console.WriteLine($"\n[{tileNumber:N0}/{totalTiles:N0}] {tile.TileFile.Name} ({remaining:N0} remaining)");
+
+                if (!inspectOnly)
+                {
+                    NormalizeTerrainMaterialFileIfLegacyMap(tile);
+                }
 
                 RawGrid? rawGrid = tile.RawHeightPath is null ? null : RawGrid.TryRead(tile.RawHeightPath, out RawGrid? grid, out _) ? grid : null;
                 RawGridStats? stats = rawGrid?.GetStats();
@@ -780,6 +864,14 @@ internal static partial class Program
             return;
         }
 
+        if (createRouteTiles && !inspectOnly &&
+            !VerifyUniformTerrainResolution(
+                routeDir, TerrainOutputResolution.Normal8m))
+        {
+            Console.WriteLine("STATUS: FAILURE - TILES");
+            return;
+        }
+
         if (createRouteTiles && !inspectOnly)
         {
             Console.WriteLine("STATUS: TILES - COMPLETE");
@@ -850,11 +942,12 @@ internal static partial class Program
         Console.WriteLine("=========================================");
         Console.WriteLine(" SCO LIDEX Route Scan ");
         Console.WriteLine("=========================================\n");
-        Console.WriteLine("Scan is read-only. No route files will be created, changed, or deleted.\n");
+        Console.WriteLine("This Scan phase is read-only. Any terrain-resolution reset occurs only after the GUI's explicit confirmation.\n");
 
         bool blockingFailure = false;
         int unreadableRouteTiles = 0;
         int unreadableDmTiles = 0;
+        SortedSet<string> invalidTiles = new(StringComparer.OrdinalIgnoreCase);
 
         if (!RouteLayout.TryLoad(routeDir, out RouteLayout? route, out string routeError))
         {
@@ -862,7 +955,59 @@ internal static partial class Program
             return new ScanSummary(false, 0, 0, 0, 0, false, DemSourcePolicy.None, false, false, false, false, false, false, false);
         }
 
-        PrintRouteSummary(route!);
+        TerrainOutputResolution requestedResolution = options.Hd4mOutput
+            ? TerrainOutputResolution.HdTest4m
+            : TerrainOutputResolution.Normal8m;
+        MapImageSize = options.HdMapTiles ? 4096 : 2048;
+        PrintRouteSummary(route!, requestedResolution);
+        HashSet<string> approvedResolutionMismatches =
+            new(StringComparer.OrdinalIgnoreCase);
+        if (options.CreateRouteTiles)
+        {
+            TerrainResolutionInspection resolutionInspection =
+                InspectTerrainResolutions(routeDir, requestedResolution);
+            if (options.ForceResolutionMismatches)
+            {
+                approvedResolutionMismatches = resolutionInspection.MismatchedTiles
+                    .Select(tile => tile.TileName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("Route-wide terrain resolution:");
+            Console.WriteLine($"  Selected output: {TerrainOutputLabel(requestedResolution)}");
+            Console.WriteLine($"  Matching tiles: {resolutionInspection.MatchingTiles:N0} / {resolutionInspection.TotalTiles:N0}");
+            if (resolutionInspection.MismatchedTiles.Count > 0)
+            {
+                Console.WriteLine($"  Mismatched tiles: {resolutionInspection.MismatchedTiles.Count:N0}");
+                if (options.ForceResolutionMismatches)
+                {
+                    Console.WriteLine("  Plan: approved for route-wide forcing during Run.");
+                }
+                else
+                {
+                    foreach (TerrainResolutionTile tile in resolutionInspection.MismatchedTiles)
+                    {
+                        invalidTiles.Add($"{tile.TileName} ({tile.DetectedLabel})");
+                    }
+                }
+            }
+
+            if (resolutionInspection.UnrecognizedTiles.Count > 0)
+            {
+                Console.WriteLine($"  Unrecognized tiles: {resolutionInspection.UnrecognizedTiles.Count:N0}");
+                foreach (TerrainResolutionIssue issue in resolutionInspection.UnrecognizedTiles)
+                {
+                    invalidTiles.Add($"{issue.TileName} ({issue.Detail})");
+                }
+            }
+
+            if (invalidTiles.Count > 0)
+            {
+                blockingFailure = true;
+                unreadableRouteTiles = invalidTiles.Count;
+            }
+        }
 
         int selectionSources = new[] { options.MarkerCoverage, options.TrackDatabaseCoverage, options.KmlCoverage, options.TextFileCoverage }.Count(v => v);
         if (selectionSources > 1)
@@ -897,7 +1042,9 @@ internal static partial class Program
             {
                 Console.WriteLine("Route tile plan: Run will create and index any missing selected base terrain tiles.");
             }
-            SortedSet<string> invalidTiles = new(StringComparer.OrdinalIgnoreCase);
+            int expectedGridSize = options.Hd4mOutput
+                ? ExperimentalRawGridSize
+                : OrtsRawGridSize;
             foreach (TerrainTile tile in processingTiles)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -928,14 +1075,20 @@ internal static partial class Program
                     continue;
                 }
 
-                RawGridStats? stats = TryGetRawGridStats(tile.RawHeightPath);
+                if (approvedResolutionMismatches.Contains(baseName))
+                {
+                    continue;
+                }
+
+                RawGridStats? stats = TryGetRawGridStats(
+                    tile.RawHeightPath, expectedGridSize);
                 if (stats is null)
                 {
                     invalidTiles.Add($"{baseName} (unreadable _y.raw height grid)");
                     continue;
                 }
 
-                if (stats.Width != OrtsRawGridSize || stats.Height != OrtsRawGridSize)
+                if (stats.Width != expectedGridSize || stats.Height != expectedGridSize)
                 {
                     invalidTiles.Add($"{baseName} (unexpected raw grid {stats.Width}x{stats.Height})");
                 }
@@ -958,7 +1111,7 @@ internal static partial class Program
             }
             else
             {
-                Console.WriteLine("Route tile scan: all selected tiles are named, decoded, positioned, and readable.");
+                Console.WriteLine($"Route tile scan: all selected tiles are named, decoded, positioned, and readable as {TerrainOutputLabel(requestedResolution)}.");
             }
 
             if (options.CreateMapTiles)
@@ -1181,7 +1334,7 @@ internal static partial class Program
         }
 
         Console.WriteLine("\nRun plan:");
-        Console.WriteLine($"  Normal terrain: {StagePlanText(options.CreateRouteTiles, routeCanRun)}");
+        Console.WriteLine($"  {TerrainOutputLabel(requestedResolution)}: {StagePlanText(options.CreateRouteTiles, routeCanRun)}");
         Console.WriteLine($"  Distant Mountains: {StagePlanText(options.CreateDistantMountains, distantMountainCanRun)}{(options.CreateDistantMountains ? " (Copernicus GLO-30 only)" : "")}");
         Console.WriteLine($"  Map overlays: {StagePlanText(options.CreateMapTiles, mapSource.CanRun)}{(mapSource.CacheOnly ? " (cached PBF; no Geofabrik polling)" : "")}");
 
@@ -1287,6 +1440,15 @@ internal static partial class Program
         }
 
         Console.WriteLine($"Selected normal terrain tiles: {selectedTiles.Count:N0}");
+        int gridSize = options.Hd4mOutput
+            ? ExperimentalRawGridSize
+            : OrtsRawGridSize;
+        double postSpacing = options.Hd4mOutput
+            ? ExperimentalPostSpacingMeters
+            : OrtsPostSpacingMeters;
+        Console.WriteLine(
+            $"Terrain Post Process grid: {gridSize}x{gridSize}, " +
+            $"{postSpacing:F0}m posts.");
         HashSet<(int X, int Z)> neededSourceTiles = BuildPostProcessSourceTileSet(selectedTiles);
         Dictionary<(int X, int Z), DecodedRawTile> sourceTiles = [];
         foreach (TerrainTile tile in route.TerrainTiles)
@@ -1302,7 +1464,9 @@ internal static partial class Program
                 continue;
             }
 
-            if (TryReadDecodedRawTile(tile, out DecodedRawTile? decoded, out string error) && decoded is not null)
+            if (TryReadDecodedRawTile(
+                    tile, gridSize, out DecodedRawTile? decoded, out string error) &&
+                decoded is not null)
             {
                 sourceTiles[key] = decoded;
             }
@@ -1322,8 +1486,8 @@ internal static partial class Program
         Dictionary<(int X, int Z), short[,]> shiftedGrids = [];
         int processed = 0;
         int failed = 0;
-        double shiftSamplesX = shiftEastMeters / OrtsPostSpacingMeters;
-        double shiftSamplesZ = shiftNorthMeters / OrtsPostSpacingMeters;
+        double shiftSamplesX = shiftEastMeters / postSpacing;
+        double shiftSamplesZ = shiftNorthMeters / postSpacing;
 
         foreach (TerrainTile tile in selectedTiles)
         {
@@ -1332,19 +1496,30 @@ internal static partial class Program
             WorldTile worldTile = tile.WorldTile!;
             Console.WriteLine($"\n[Post {processed:N0}/{selectedTiles.Count:N0}] {tile.TileFile.Name}");
 
-            if (!TryReadDecodedRawTile(tile, out DecodedRawTile? target, out string targetError) || target is null)
+            if (!TryReadDecodedRawTile(
+                    tile, gridSize, out DecodedRawTile? target,
+                    out string targetError) || target is null)
             {
                 failed++;
                 Console.WriteLine($"  -> Failed: {targetError}");
                 continue;
             }
 
-            short[,] shifted = ShiftDecodedTile(worldTile.X, worldTile.Z, target.Heights, sourceTiles, shiftSamplesX, shiftSamplesZ);
+            short[,] shifted = ShiftDecodedTile(
+                worldTile.X, worldTile.Z, target.Heights, sourceTiles,
+                shiftSamplesX, shiftSamplesZ, gridSize);
             shiftedGrids[(worldTile.X, worldTile.Z)] = shifted;
             Console.WriteLine("  -> Prepared shifted height grid.");
         }
 
-        MergeSharedEdges(shiftedGrids);
+        if (options.Hd4mOutput)
+        {
+            MergeExperimentalSharedEdges(shiftedGrids);
+        }
+        else
+        {
+            MergeSharedEdges(shiftedGrids);
+        }
 
         int written = 0;
         foreach (TerrainTile tile in selectedTiles)
@@ -1366,7 +1541,14 @@ internal static partial class Program
             try
             {
                 EnsureExactFileNameCasing(tile.RawHeightPath!);
-                WriteRawGrid(tile.RawHeightPath!, shifted, encoding);
+                if (options.Hd4mOutput)
+                {
+                    WriteExperimentalRawGrid(tile.RawHeightPath!, shifted, encoding);
+                }
+                else
+                {
+                    WriteRawGrid(tile.RawHeightPath!, shifted, encoding);
+                }
                 written++;
             }
             catch (Exception ex)
@@ -1540,7 +1722,11 @@ internal static partial class Program
         return needed;
     }
 
-    private static bool TryReadDecodedRawTile(TerrainTile tile, out DecodedRawTile? decoded, out string error)
+    private static bool TryReadDecodedRawTile(
+        TerrainTile tile,
+        int gridSize,
+        out DecodedRawTile? decoded,
+        out string error)
     {
         decoded = null;
         if (tile.WorldTile is null)
@@ -1562,18 +1748,18 @@ internal static partial class Program
         }
 
         byte[] bytes = File.ReadAllBytes(tile.RawHeightPath);
-        int expectedBytes = OrtsRawGridSize * OrtsRawGridSize * sizeof(short);
+        int expectedBytes = gridSize * gridSize * sizeof(short);
         if (bytes.Length != expectedBytes)
         {
             error = $"expected {expectedBytes} bytes in raw grid, found {bytes.Length}";
             return false;
         }
 
-        short[,] heights = new short[OrtsRawGridSize, OrtsRawGridSize];
+        short[,] heights = new short[gridSize, gridSize];
         int offset = 0;
-        for (int y = 0; y < OrtsRawGridSize; y++)
+        for (int y = 0; y < gridSize; y++)
         {
-            for (int x = 0; x < OrtsRawGridSize; x++)
+            for (int x = 0; x < gridSize; x++)
             {
                 short signedRaw = BitConverter.ToInt16(bytes, offset);
                 ushort raw = BitConverter.ToUInt16(bytes, offset);
@@ -1595,16 +1781,19 @@ internal static partial class Program
         short[,] original,
         IReadOnlyDictionary<(int X, int Z), DecodedRawTile> sourceTiles,
         double shiftSamplesX,
-        double shiftSamplesZ)
+        double shiftSamplesZ,
+        int gridSize)
     {
-        short[,] shifted = new short[OrtsRawGridSize, OrtsRawGridSize];
-        for (int y = 0; y < OrtsRawGridSize; y++)
+        short[,] shifted = new short[gridSize, gridSize];
+        for (int y = 0; y < gridSize; y++)
         {
-            for (int x = 0; x < OrtsRawGridSize; x++)
+            for (int x = 0; x < gridSize; x++)
             {
-                double globalX = (tileX * OrtsRawGridSize) + x;
-                double globalZ = (tileZ * OrtsRawGridSize) + (OrtsRawGridSize - 1 - y);
-                short sampled = SampleDecodedHeight(sourceTiles, globalX - shiftSamplesX, globalZ - shiftSamplesZ);
+                double globalX = (tileX * gridSize) + x;
+                double globalZ = (tileZ * gridSize) + (gridSize - 1 - y);
+                short sampled = SampleDecodedHeight(
+                    sourceTiles, globalX - shiftSamplesX,
+                    globalZ - shiftSamplesZ, gridSize);
                 shifted[y, x] = sampled == RawMissingHeight ? original[y, x] : sampled;
             }
         }
@@ -1615,7 +1804,8 @@ internal static partial class Program
     private static short SampleDecodedHeight(
         IReadOnlyDictionary<(int X, int Z), DecodedRawTile> sourceTiles,
         double globalX,
-        double globalZ)
+        double globalZ,
+        int gridSize)
     {
         int x0 = (int)Math.Floor(globalX);
         int z0 = (int)Math.Floor(globalZ);
@@ -1626,10 +1816,10 @@ internal static partial class Program
 
         (short Height, double Weight)[] samples =
         [
-            (GetDecodedPost(sourceTiles, x0, z0), (1 - fx) * (1 - fz)),
-            (GetDecodedPost(sourceTiles, x1, z0), fx * (1 - fz)),
-            (GetDecodedPost(sourceTiles, x0, z1), (1 - fx) * fz),
-            (GetDecodedPost(sourceTiles, x1, z1), fx * fz),
+            (GetDecodedPost(sourceTiles, x0, z0, gridSize), (1 - fx) * (1 - fz)),
+            (GetDecodedPost(sourceTiles, x1, z0, gridSize), fx * (1 - fz)),
+            (GetDecodedPost(sourceTiles, x0, z1, gridSize), (1 - fx) * fz),
+            (GetDecodedPost(sourceTiles, x1, z1, gridSize), fx * fz),
         ];
 
         double sum = 0;
@@ -1648,13 +1838,17 @@ internal static partial class Program
         return weight <= 0 ? RawMissingHeight : ClampToInt16Meters(sum / weight);
     }
 
-    private static short GetDecodedPost(IReadOnlyDictionary<(int X, int Z), DecodedRawTile> sourceTiles, int globalX, int globalZ)
+    private static short GetDecodedPost(
+        IReadOnlyDictionary<(int X, int Z), DecodedRawTile> sourceTiles,
+        int globalX,
+        int globalZ,
+        int gridSize)
     {
-        int tileX = FloorDiv(globalX, OrtsRawGridSize);
-        int tileZ = FloorDiv(globalZ, OrtsRawGridSize);
-        int localX = globalX - (tileX * OrtsRawGridSize);
-        int localNorth = globalZ - (tileZ * OrtsRawGridSize);
-        int y = OrtsRawGridSize - 1 - localNorth;
+        int tileX = FloorDiv(globalX, gridSize);
+        int tileZ = FloorDiv(globalZ, gridSize);
+        int localX = globalX - (tileX * gridSize);
+        int localNorth = globalZ - (tileZ * gridSize);
+        int y = gridSize - 1 - localNorth;
         return sourceTiles.TryGetValue((tileX, tileZ), out DecodedRawTile? tile)
             ? tile.Heights[y, localX]
             : RawMissingHeight;

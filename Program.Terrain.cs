@@ -24,7 +24,9 @@ namespace ORterr;
 
 internal static partial class Program
 {
-    private static void PrintRouteSummary(RouteLayout route)
+    private static void PrintRouteSummary(
+        RouteLayout route,
+        TerrainOutputResolution terrainResolution)
     {
         Console.WriteLine($"Route: {route.RouteDir}");
         Console.WriteLine($"Tiles: {route.TerrainTiles.Count}");
@@ -55,7 +57,10 @@ internal static partial class Program
         }
 
         Console.WriteLine("\nImportant: this route uses external *_y.raw height grids.");
-        Console.WriteLine($"Detected raw grid size is {OrtsRawGridSize}x{OrtsRawGridSize} int16 samples, not inline text heights.");
+        int gridSize = TerrainGridSize(terrainResolution);
+        Console.WriteLine(
+            $"Selected raw grid size is {gridSize}x{gridSize} int16 samples " +
+            $"for {TerrainOutputLabel(terrainResolution)}, not inline text heights.");
     }
 
     private static void PrintProjectionSummary(GeoTileMapper mapper)
@@ -68,8 +73,8 @@ internal static partial class Program
     // Fill one ORTS 256-post terrain grid. The order is intentional:
     // 1m first, then 5m~ Original Product Resolution, 10m, and finally the
     // key-free Copernicus 30m global source for posts outside US coverage.
-    // A failed source lookup is treated as unavailable for that tile so the
-    // remaining configured sources, including Copernicus, can still be used.
+    // Confirmed no-coverage results may advance to the next source. Temporary
+    // service/query failures must not silently lower a tile's source quality.
     private static async Task<TerrainGenerationResult> StreamOrtsGridForSampleGridAsync(
         HttpClient client,
         GeoSampleGrid sampleGrid,
@@ -79,7 +84,7 @@ internal static partial class Program
         int gridHeight = sampleGrid.Longitudes.GetLength(0);
         int gridWidth = sampleGrid.Longitudes.GetLength(1);
         short[,] mergedHeights = CreateMissingHeightGrid(gridWidth, gridHeight);
-        DemWindowSearchResult primarySearch = new([], ProductSearchFailed: false);
+        DemWindowSearchResult primarySearch = new([], SourceHiccup: false);
         int primarySamplesUsed = 0;
         if (sourcePolicy.UsePrimary)
         {
@@ -88,6 +93,7 @@ internal static partial class Program
         }
 
         int missingAfterPrimary = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
+        ThrowIfSourceHiccupLeftMissingSamples(primarySearch, PrimaryDemLabel, missingAfterPrimary);
         int intermediateSamplesUsed = 0;
         int fallbackSamplesUsed = 0;
         int globalSamplesUsed = 0;
@@ -96,10 +102,8 @@ internal static partial class Program
             Console.WriteLine($"  -> {PrimaryDemLabel} coverage left {missingAfterPrimary:N0} missing samples; trying {IntermediateDemLabel} fallback ({IntermediateDemDataset}).");
             DemWindowSearchResult intermediateSearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, IntermediateDemDataset, failures);
             intermediateSamplesUsed = MergeWindows(intermediateSearch.Windows, mergedHeights);
-            if (intermediateSearch.ProductSearchFailed)
-            {
-                Console.WriteLine($"  -> {IntermediateDemLabel} product search failed; continuing to {FallbackDemLabel} fallback ({FallbackDemDataset}).");
-            }
+            int missingAfterIntermediateSearch = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
+            ThrowIfSourceHiccupLeftMissingSamples(intermediateSearch, IntermediateDemLabel, missingAfterIntermediateSearch);
         }
 
         int missingAfterIntermediate = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
@@ -108,6 +112,8 @@ internal static partial class Program
             Console.WriteLine($"  -> {IntermediateDemLabel} coverage left {missingAfterIntermediate:N0} missing samples; trying {FallbackDemLabel} fallback ({FallbackDemDataset}).");
             DemWindowSearchResult fallbackSearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, FallbackDemDataset, failures);
             fallbackSamplesUsed = MergeWindows(fallbackSearch.Windows, mergedHeights);
+            int missingAfterFallbackSearch = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
+            ThrowIfSourceHiccupLeftMissingSamples(fallbackSearch, FallbackDemLabel, missingAfterFallbackSearch);
         }
 
         int missingAfterFallback = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
@@ -134,6 +140,22 @@ internal static partial class Program
         return new TerrainGenerationResult(mergedHeights, primarySamplesUsed, intermediateSamplesUsed, fallbackSamplesUsed, globalSamplesUsed, missingBeforeFill);
     }
 
+    private static void ThrowIfSourceHiccupLeftMissingSamples(
+        DemWindowSearchResult search,
+        string sourceLabel,
+        int missingSamples)
+    {
+        if (!search.SourceHiccup || missingSamples == 0)
+        {
+            return;
+        }
+
+        throw new RetryableDemSourceException(
+            $"temporary {sourceLabel} source hiccup left {missingSamples:N0} samples unresolved; " +
+            "lower-resolution fallback was not accepted. " +
+            (search.HiccupDetail ?? "The source did not return a usable response."));
+    }
+
     // Ask USGS which GeoTIFF products overlap the route tile's bbox, filter the
     // resulting URLs, then ask GDAL to read only the raster windows needed.
     private static async Task<DemWindowSearchResult> ReadDemWindowsForDatasetAsync(
@@ -155,19 +177,8 @@ internal static partial class Program
         }
         catch (Exception ex) when (ex is TaskCanceledException or HttpRequestException or InvalidOperationException)
         {
-            failures.Add($"{datasetName} product search failed for bbox lon {minLon:F6}..{maxLon:F6}, lat {minLat:F6}..{maxLat:F6}: {ex.Message}");
-            List<string> cachedUrls = GetCachedProductUrls(datasetName);
-            cachedUrls = FilterDemProductUrls(datasetName, cachedUrls);
-            if (cachedUrls.Count == 0)
-            {
-                Console.WriteLine($"  -> USGS product search failed and no cached {GetDemSourceDisplayName(datasetName)} product URLs are available: {ex.Message}");
-                return new DemWindowSearchResult([], ProductSearchFailed: true);
-            }
-
-            Console.WriteLine($"  -> USGS product search failed; trying {cachedUrls.Count:N0} cached {GetDemSourceDisplayName(datasetName)} product URLs from nearby tiles.");
-            return new DemWindowSearchResult(
-                ReadDemWindowsFromUrls(cachedUrls, datasetName, sampleGrid, failures),
-                ProductSearchFailed: true);
+            string detail = $"product search failed for bbox lon {minLon:F6}..{maxLon:F6}, lat {minLat:F6}..{maxLat:F6}: {ex.Message}";
+            return ReadCachedDemWindowsAfterSourceHiccup(datasetName, sampleGrid, failures, detail);
         }
 
         JsonDocument doc;
@@ -177,24 +188,23 @@ internal static partial class Program
         }
         catch (InvalidOperationException ex)
         {
-            failures.Add($"{datasetName} product search returned unusable data: {ex.Message}");
-            Console.WriteLine($"  -> USGS {GetDemSourceDisplayName(datasetName)} returned unusable data; continuing to the next DEM source.");
-            return new DemWindowSearchResult([], ProductSearchFailed: true);
+            string detail = $"product search returned unusable data: {ex.Message}";
+            return ReadCachedDemWindowsAfterSourceHiccup(datasetName, sampleGrid, failures, detail);
         }
 
         using (doc)
         {
             if (!doc.RootElement.TryGetProperty("items", out JsonElement items) || items.ValueKind != JsonValueKind.Array)
             {
-                failures.Add($"{datasetName} product search response did not contain a usable items list.");
-                Console.WriteLine($"  -> USGS {GetDemSourceDisplayName(datasetName)} returned no usable items list; continuing to the next DEM source.");
-                return new DemWindowSearchResult([], ProductSearchFailed: true);
+                string detail = "product search response did not contain a usable items list.";
+                return ReadCachedDemWindowsAfterSourceHiccup(datasetName, sampleGrid, failures, detail);
             }
 
             if (items.GetArrayLength() == 0)
             {
                 failures.Add($"No {GetDemSourceDisplayName(datasetName)} product found for tile bbox lon {minLon:F6}..{maxLon:F6}, lat {minLat:F6}..{maxLat:F6}.");
-                return new DemWindowSearchResult([], ProductSearchFailed: false);
+                Console.WriteLine($"  -> No {GetDemSourceDisplayName(datasetName)} coverage was returned for this tile; lower-resolution fallback is permitted.");
+                return new DemWindowSearchResult([], SourceHiccup: false);
             }
 
             List<string> urls = [];
@@ -212,16 +222,49 @@ internal static partial class Program
 
             if (urls.Count == 0)
             {
-                failures.Add($"USGS found {GetDemSourceDisplayName(datasetName)} products but none had a downloadable GeoTIFF URL.");
-                return new DemWindowSearchResult([], ProductSearchFailed: false);
+                string detail = "products were returned but none contained a downloadable GeoTIFF URL.";
+                return ReadCachedDemWindowsAfterSourceHiccup(datasetName, sampleGrid, failures, detail);
             }
 
             urls = FilterDemProductUrls(datasetName, urls);
             AddCachedProductUrls(datasetName, urls);
+            int failuresBeforeRead = failures.Count;
+            List<DemWindow> windows = ReadDemWindowsFromUrls(urls, datasetName, sampleGrid, failures);
+            bool readHiccup = failures.Count > failuresBeforeRead;
             return new DemWindowSearchResult(
-                ReadDemWindowsFromUrls(urls, datasetName, sampleGrid, failures),
-                ProductSearchFailed: false);
+                windows,
+                SourceHiccup: readHiccup,
+                HiccupDetail: readHiccup
+                    ? string.Join(" | ", failures.Skip(failuresBeforeRead).Take(3))
+                    : null);
         }
+    }
+
+    private static DemWindowSearchResult ReadCachedDemWindowsAfterSourceHiccup(
+        string datasetName,
+        GeoSampleGrid sampleGrid,
+        List<string> failures,
+        string detail)
+    {
+        failures.Add($"{datasetName} {detail}");
+        List<string> cachedUrls = FilterDemProductUrls(datasetName, GetCachedProductUrls(datasetName));
+        if (cachedUrls.Count == 0)
+        {
+            Console.WriteLine(
+                $"  -> USGS {GetDemSourceDisplayName(datasetName)} source hiccup; " +
+                $"no cached product URLs are available: {detail}");
+            return new DemWindowSearchResult([], SourceHiccup: true, HiccupDetail: detail);
+        }
+
+        Console.WriteLine(
+            $"  -> USGS {GetDemSourceDisplayName(datasetName)} source hiccup; " +
+            $"trying {cachedUrls.Count:N0} cached product URL(s) before marking the tile for retry.");
+        int failuresBeforeRead = failures.Count;
+        List<DemWindow> windows = ReadDemWindowsFromUrls(cachedUrls, datasetName, sampleGrid, failures);
+        string cacheFailureDetail = failures.Count > failuresBeforeRead
+            ? string.Join(" | ", failures.Skip(failuresBeforeRead).Take(3))
+            : detail;
+        return new DemWindowSearchResult(windows, SourceHiccup: true, HiccupDetail: cacheFailureDetail);
     }
 
     private static async Task<string> GetStringWithRetryAsync(HttpClient client, string apiUrl, string datasetName)
@@ -784,6 +827,8 @@ internal static partial class Program
         TerrainSampleEncoding encoding = CalculateSampleEncoding(generated.Heights);
 
         byte[] tileBytes = CreatePatchedTerrainTileBytes(generated, patchHeights, encoding, cleanTileTemplate);
+        PatchTerrainResolutionMetadata(
+            tileBytes, OrtsRawGridSize, (float)OrtsPostSpacingMeters);
         EnsureExactFileNameCasing(tileOutputPath);
         EnsureExactFileNameCasing(rawOutputPath);
         File.WriteAllBytes(tileOutputPath, tileBytes);
@@ -798,6 +843,8 @@ internal static partial class Program
         }
 
         byte[] existingBytes = File.ReadAllBytes(generated.Tile.TileFile.FullName);
+        existingBytes = NormalizeLegacyMapTerrainMaterial(
+            existingBytes, generated.Tile.TileFile.Name, out _);
         try
         {
             PatchTerrainTileHeights(existingBytes, patchHeights, encoding);
@@ -826,6 +873,159 @@ internal static partial class Program
             .SelectMany(d => d.EnumerateFiles("*.t"))
             .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
+    }
+
+    private static bool NormalizeTerrainMaterialFileIfLegacyMap(TerrainTile tile)
+    {
+        try
+        {
+            byte[] source = File.ReadAllBytes(tile.TileFile.FullName);
+            byte[] normalized = NormalizeLegacyMapTerrainMaterial(
+                source, tile.TileFile.Name, out bool changed);
+            if (!changed)
+            {
+                return false;
+            }
+
+            string stagedPath = tile.TileFile.FullName + ".scolidex-material-stage";
+            try
+            {
+                File.WriteAllBytes(stagedPath, normalized);
+                File.Move(stagedPath, tile.TileFile.FullName, overwrite: true);
+            }
+            finally
+            {
+                TryDeleteFile(stagedPath);
+            }
+
+            Console.WriteLine(
+                "  -> Reset legacy map terrain material to terrain.ace; " +
+                "the separate terrain_maps overlay remains unchanged.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(
+                $"  -> Could not normalize legacy map terrain material: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static byte[] NormalizeLegacyMapTerrainMaterial(
+        byte[] source,
+        string tileName,
+        out bool changed)
+    {
+        changed = Encoding.Unicode.GetString(source)
+            .Contains("_map.ace", StringComparison.OrdinalIgnoreCase);
+        if (!changed)
+        {
+            return source;
+        }
+
+        FileInfo template = FindGeneratedTerrainTileTemplate()
+            ?? throw new InvalidOperationException(
+                "could not find the clean terrain material template");
+        byte[] templateBytes = File.ReadAllBytes(template.FullName);
+        ValidateTerrainBinaryForMaterialReset(source, tileName);
+        ValidateTerrainBinaryForMaterialReset(templateBytes, template.Name);
+
+        const int terrainPosition = 32;
+        int sourceTerrainEnd = terrainPosition + 8 +
+            checked((int)BitConverter.ToUInt32(source, terrainPosition + 4));
+        int templateTerrainEnd = terrainPosition + 8 +
+            checked((int)BitConverter.ToUInt32(templateBytes, terrainPosition + 4));
+        (int sourceMaterialStart, int sourceMaterialEnd) = FindDirectChildBlock(
+            source, terrainPosition + 9, sourceTerrainEnd, 151);
+        (int templateMaterialStart, int templateMaterialEnd) = FindDirectChildBlock(
+            templateBytes, terrainPosition + 9, templateTerrainEnd, 151);
+
+        int templateMaterialLength = templateMaterialEnd - templateMaterialStart;
+        using MemoryStream assembled = new(
+            source.Length + templateMaterialLength -
+            (sourceMaterialEnd - sourceMaterialStart));
+        assembled.Write(source, 0, sourceMaterialStart);
+        assembled.Write(
+            templateBytes, templateMaterialStart, templateMaterialLength);
+        assembled.Write(
+            source, sourceMaterialEnd, source.Length - sourceMaterialEnd);
+        byte[] result = assembled.ToArray();
+        int delta = templateMaterialLength -
+            (sourceMaterialEnd - sourceMaterialStart);
+        WriteUInt32(
+            result,
+            terrainPosition + 4,
+            checked((uint)(BitConverter.ToUInt32(source, terrainPosition + 4) + delta)));
+
+        CopyDefaultTerrainPatchMaterialState(templateBytes, result);
+        string normalizedText = Encoding.Unicode.GetString(result);
+        if (!normalizedText.Contains("terrain.ace", StringComparison.OrdinalIgnoreCase) ||
+            normalizedText.Contains("_map.ace", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                $"terrain material reset validation failed for {tileName}");
+        }
+
+        return result;
+    }
+
+    private static void ValidateTerrainBinaryForMaterialReset(
+        byte[] bytes,
+        string fileName)
+    {
+        if (bytes.Length < 40 ||
+            Encoding.ASCII.GetString(bytes, 0, 8) != "SIMISA@@" ||
+            BitConverter.ToUInt16(bytes, 32) != TokenTerrain)
+        {
+            throw new InvalidDataException(
+                $"{fileName} is not a supported binary terrain tile");
+        }
+    }
+
+    private static void CopyDefaultTerrainPatchMaterialState(
+        byte[] templateBytes,
+        byte[] targetBytes)
+    {
+        List<int> templatePatches = [];
+        List<int> targetPatches = [];
+        WalkBinaryTokens(
+            templateBytes, 32, templateBytes.Length, 0,
+            (token, payload, blockEnd) =>
+            {
+                if (token == TokenTerrainPatchsetPatch && payload + 56 <= blockEnd)
+                {
+                    templatePatches.Add(payload);
+                }
+            });
+        WalkBinaryTokens(
+            targetBytes, 32, targetBytes.Length, 0,
+            (token, payload, blockEnd) =>
+            {
+                if (token == TokenTerrainPatchsetPatch && payload + 56 <= blockEnd)
+                {
+                    targetPatches.Add(payload);
+                }
+            });
+
+        int expected = TerrainPatchGridSize * TerrainPatchGridSize;
+        if (templatePatches.Count != expected || targetPatches.Count != expected)
+        {
+            throw new InvalidDataException(
+                $"terrain patch material reset expected {expected:N0} patches; " +
+                $"template={templatePatches.Count:N0}, target={targetPatches.Count:N0}");
+        }
+
+        const int materialAndUvOffset = 28;
+        const int materialAndUvBytes = 28;
+        for (int index = 0; index < expected; index++)
+        {
+            Buffer.BlockCopy(
+                templateBytes,
+                templatePatches[index] + materialAndUvOffset,
+                targetBytes,
+                targetPatches[index] + materialAndUvOffset,
+                materialAndUvBytes);
+        }
     }
 
     private static IEnumerable<DirectoryInfo> EnumerateGeneratedTileTemplateDirectories()
@@ -1569,7 +1769,12 @@ internal static partial class Program
 
     private sealed record DemWindow(string ProductName, short[,] Heights, int ValidSamples);
 
-    private sealed record DemWindowSearchResult(IReadOnlyList<DemWindow> Windows, bool ProductSearchFailed);
+    private sealed record DemWindowSearchResult(
+        IReadOnlyList<DemWindow> Windows,
+        bool SourceHiccup,
+        string? HiccupDetail = null);
+
+    private sealed class RetryableDemSourceException(string message) : InvalidOperationException(message);
 
     private sealed record TerrainSampleEncoding(float Floor, float Scale);
 

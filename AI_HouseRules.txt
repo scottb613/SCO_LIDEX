@@ -10,7 +10,7 @@ Current Repository Baseline
 - Normal development is performed on `work-in-progress`.
 - At a completed release boundary, `master`, `work-in-progress`, and the
   release tag should identify the same reviewed commit.
-- The current public baseline is v1.200. Update this statement when the next
+- The current public baseline is v1.300. Update this statement when the next
   version is formally released.
 
 Supported Build Tools
@@ -38,7 +38,7 @@ Repository Layout and File Placement
 - Do not recreate a nested `SCO_LIDEX` repository or parallel source copy.
 - `work-in-progress` is a Git branch, not a second filesystem directory.
 - C# source and project files remain in the repository root.
-- Permanent user documentation remains in the root and under `docs` as
+- Permanent user documentation remains in the root and under `docsMaster` as
   currently organized. Matching documents must remain synchronized.
 - Generated terrain templates belong under `generated-tiles` and
   `generated-lo_tiles`.
@@ -63,6 +63,15 @@ Repository Layout and File Placement
 AI House Rules
 ==============
 
+- Rule 1 - Stay in your lane. An AI task rooted in this repository may inspect
+  and read files in any other repository, but it must never create, edit,
+  delete, rename, move, format, build into, or otherwise modify files in another
+  repository. All coding and other writes must remain in the repository that
+  owns the task. Cross-repository findings are read-only references and must be
+  handed off to a separately authorized task rooted in the repository that owns
+  the files, after that repository's `AI_HouseRules.txt` has been read. A shared
+  feature or integration dependency does not grant write access across
+  repository boundaries.
 - Work by explicit Git version/tag boundaries.
 - Preserve unrelated user changes in a dirty worktree.
 - Before editing, inspect the current branch, status, remote, and relevant
@@ -121,8 +130,8 @@ Version and Tag Rules
   - `VERSION`
   - `SCOLIDEX.csproj` Version, AssemblyVersion, and FileVersion
   - `README.md` and `README.txt`
-  - `CHANGELOG.txt` and `docs\CHANGELOG.txt`
-  - `INSTRUCTIONS.txt` and `docs\INSTRUCTIONS.txt`
+  - `CHANGELOG.txt` and `docsMaster\CHANGELOG.txt`
+  - `INSTRUCTIONS.txt` and `docsMaster\INSTRUCTIONS.txt`
   - any versioned download links, release references, and runtime user-agent
     text
 - Search the complete tracked code/document set for the old version before
@@ -140,9 +149,9 @@ Documentation Rules
 
 - Use the established v1.100/v1.200 README and GitHub release presentation as
   the formatting model for later releases.
-- Keep root text documents and their respective `docs` copies synchronized.
+- Keep root text documents and their respective `docsMaster` copies synchronized.
 - `README.md` is the primary formatted public overview.
-- `README.txt` and `docs\README.txt` must carry the same release facts in
+- `README.txt` and `docsMaster\README.txt` must carry the same release facts in
   plain-text form.
 - `CHANGELOG.txt` records the complete release changes; do not silently add
   current work to an older release after that release is capped.

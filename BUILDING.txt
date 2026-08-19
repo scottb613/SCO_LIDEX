@@ -21,25 +21,27 @@ Publish self-contained Win x64:
 
   dotnet publish SCOLIDEX.csproj -c Release -r win-x64 --self-contained true -o <clean-staging-folder>
 
-Experimental 4m source status:
-  Program.Experimental4m.cs and its supporting 512-grid/seam mechanisms remain
-  compiled for evaluation. The packaged GUI deliberately keeps both Terrain
-  Output radio buttons disabled with Normal - 8 m selected. Testing - 4 m is
-  not a supported selectable release output; use it only in a deliberate Open
-  Rails test workflow.
+Terrain output status:
+  Normal - 8m Tiles is locked by default. Enable HD Mesh Tiles unlocks the HD
+  Test - 4m choice. When route tiles are selected, Scan reports resolution
+  mismatches without writing; approved conversion occurs during Run.
+  The focused conversion probe is available as --terrain-resolution-probe.
+  Both normal resolutions and Distant Mountains use bounded rolling seam
+  windows. Verify them without network access using --rolling-terrain-probe.
+  OSM map PNGs default to 2048x2048; Enable HD Map Tiles selects 4096x4096.
 
 Distribution layout:
   AddShortcutDesktop.cmd
   README.md
   README.txt
   SCOLIDEX-win-x64\
-  docs\
+  docsMaster\
 
 All WAV files under content\ are copied automatically to build and publish
 output. Keep every supplied sound there, including sounds reserved for later.
 
-The docs folder is tracked in source and must be copied into every packaged
-distribution. Keep the root README files and docs copies synchronized before
+The docsMaster folder is tracked in source and must be copied into every packaged
+distribution. Keep the root README files and docsMaster copies synchronized before
 publishing a release.
 
 License:

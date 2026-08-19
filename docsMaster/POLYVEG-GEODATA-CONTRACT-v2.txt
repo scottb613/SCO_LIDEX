@@ -1,0 +1,180 @@
+SCO LIDEX / TSRE GenX PolyVeg Geodata Contract v2
+=================================================
+
+Status
+------
+Development contract for SCO LIDEX v1.300 and TSRE GenX v0.12.
+PolyVeg is the only planting-geodata handoff. There is no legacy forest
+GeoJSON fallback.
+
+Atomic route output
+-------------------
+<Route>\osm_data\route-geodata.gpkg
+<Route>\osm_data\route-geodata.json
+<Route>\osm_data\polyveg-polygons.geojson
+<Route>\osm_data\polyveg-exclusions.geojson
+
+All four files are generated and validated together. The complete set is
+promoted only after every validation succeeds.
+
+OSM source
+----------
+LIDEX uses the smallest single official Geofabrik regional extract whose
+published polygon covers every selected route point. This worldwide rule has
+no country-specific handling. Completed geometry is filtered to route coverage
+while reading the regional source; the four validated outputs remain the only
+TSRE handoff.
+
+Canonical rural polygon styles
+------------------------------
+Category     styleId                         RGB             drawOrder
+woodland     natural=wood                    141,196,108     20
+woodland     landuse=forest                  133,193,133     20
+woodland     landuse=wood                    133,193,133     20
+woodland     natural=tree_row                133,193,133     30
+scrub        natural=scrub                   181,226,181     20
+heath        natural=heath                   213,216,159     20
+wetland      natural=wetland                  95,180,160     20
+grassland    natural=grassland               198,228,180     20
+grassland    landuse=grass                   207,236,168     20
+grassland    landuse=meadow                  207,236,168     20
+grassland    landuse=pasture                 207,236,168     20
+agriculture  landuse=farmland                233,216,189     10
+agriculture  landuse=farm                    234,216,184     20
+agriculture  landuse=farmyard                220,190,146     30
+agriculture  landuse=greenhouse_horticulture 231,241,222     30
+orchard      landuse=orchard                 207,255,168     20
+orchard      landuse=vineyard                207,255,168     20
+orchard      landuse=plant_nursery           204,220,112     20
+orchard      landuse=allotments              204,220,112     20
+parkland     landuse=village_green           207,236,168     20
+parkland     landuse=recreation_ground       207,236,168     20
+parkland     leisure=park                    206,246,202     20
+parkland     leisure=common                  199,241,163     40
+parkland     leisure=garden                  199,241,163     30
+golf_course  leisure=golf_course             199,241,163     40
+cemetery     landuse=cemetery                151,191,164     20
+sports       leisure=sports_centre           206,246,202     20
+sports       leisure=stadium                 206,246,202     40
+sports       leisure=pitch                   137,210,174     50
+sports       leisure=track                   116,219,185     30
+sports       leisure=playground              204,254,254     50
+zoo          tourism=zoo                     164,242,161     30
+
+The RGB values and drawing layers match the TSRE F3 palette. drawOrder is the
+numeric LIDEX paint order. Higher drawOrder is visually above lower drawOrder.
+For equal drawOrder, stable sourceId ordering defines the paint sequence.
+
+Important identifier distinction
+--------------------------------
+leisure=track is a selectable sports polygon.
+highway=track is a permanent transport exclusion.
+All active railway features are permanent transport exclusions.
+
+Visible-surface rule
+--------------------
+Final PolyVeg features are mutually exclusive and already represent what is
+visible in the LIDEX/F3 rural polygon stack.
+
+1. Collect every canonical rural source polygon. Convert each
+   natural=tree_row way into a 10 m-wide polygon with round joins and caps.
+2. Clip it to exact normal terrain-tile coverage. A terrain tile remains part
+   of route coverage even when it has no object-bearing .w world file.
+3. Assign category, exact key=value styleId, RGB fill, drawOrder, and stable
+   sourceId.
+4. Sort top-to-bottom by drawOrder and stable source sequence.
+5. For each source calculate:
+
+   visible = source
+             - permanentExclusions
+             - allPreviouslyClaimedVisiblePolyVeg
+
+6. Add the retained visible geometry to the claimed-visible union.
+7. Export one logical feature per retained source polygon. All pieces carved
+   from that source remain in one Polygon or MultiPolygon feature.
+
+LIDEX may execute the same deterministic calculation in bounded terrain
+sections. Section processing must include an overlap halo at least as wide as
+the configured vegetation clearance, retain the global draw/source order, and
+recombine pieces by sourceId before export. Exclusion and overlap topology may
+be validated within each bounded section; final validation still verifies the
+assembled feature schema, identity, CRS, polygonal geometry, and manifest
+counts before atomic promotion.
+
+Because this output controls terrain vegetation rather than surveyed parcel
+boundaries, LIDEX maintains a 0.3048 m (one-foot) non-plantable clearance at
+permanent exclusions and between successively stacked PolyVeg features. The
+overlay calculation uses a 0.10 m precision grid. This small safety margin
+prevents unstable shared-edge topology while preserving the visible map shape.
+
+No coordinate may belong to two final plantable PolyVeg features. TSRE selects
+the exported boundary and does not reconstruct stacking or OSM exclusions.
+
+Permanent exclusions
+--------------------
+Subtract from every canonical rural category:
+
+- buildings
+- developed and urban land
+- roads
+- highway tracks
+- active railways
+- paths and trails
+- open water
+- waterways with configured clearance
+- bare ground, beaches, sand, rock, scree, and quarries
+
+Steep slope is not OSM exclusion geometry. TSRE evaluates slope separately
+during candidate generation.
+
+Required feature properties
+---------------------------
+Every polyveg-polygons.geojson feature contains at least:
+
+category       Canonical category from the table above.
+styleId        Exact OSM key=value identifier from the table above.
+drawOrder      Numeric F3/LIDEX-equivalent paint order.
+sourceId       Stable OSM identity, such as relation/12345 or way/67890.
+fillColor      RGB color encoded as #RRGGBB.
+fillRgb        Three-element integer array [red, green, blue].
+natural        Original natural tag or an empty string.
+landuse        Original landuse tag or an empty string.
+
+Other useful original OSM tags are retained when present. Pieces derived from
+one source retain the same sourceId and category. Different overlapping source
+polygons retain separate identities for any visible area that survives.
+Tree-row features additionally record derivedGeometry=line_buffer and
+derivedWidthMetres=10 while retaining their stable OSM way sourceId.
+
+Geometry
+--------
+- GeoJSON CRS is EPSG:4326.
+- Coverage is the exact union of normal route terrain-tile footprints. Empty
+  terrain is not omitted merely because its .w world file does not yet exist.
+- Large polygons crossing or surrounding route coverage are retained by
+  clipping completed geometry, not by filtering source vertices.
+- Polygon holes and multipolygons are preserved.
+- Invalid source geometry is repaired when safely possible.
+- Empty, zero-area, and non-polygonal results are omitted.
+
+Validation gates
+----------------
+Fail the LIDEX operation before promotion when any of these checks fail:
+
+- Missing category, styleId, drawOrder, sourceId, or RGB fill.
+- Unknown canonical category.
+- Non-Polygon/MultiPolygon, empty, or zero-area output.
+- CRS is not EPSG:4326.
+- Two final PolyVeg features overlap beyond 0.01 square metre tolerance.
+- A final PolyVeg feature intersects the permanent exclusion union beyond
+  0.01 square metre tolerance.
+- GeoPackage, category, exclusion, or manifest feature counts disagree.
+
+Ownership boundary
+------------------
+LIDEX owns OSM classification, F3-compatible styling metadata, exact route
+clipping, visible-layer subtraction, and permanent OSM exclusions.
+
+TSRE owns operator-selected vegetation definitions, density and maximum-tree
+settings, terrain/slope rejection, generation, baking, deletion, and route
+save behavior.

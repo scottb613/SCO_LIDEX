@@ -420,7 +420,6 @@ internal static partial class Program
                         GetRouteOsmDirectory(routePath));
                 }
             }
-
         }
 
         OsmCacheRegistry refreshed = new(

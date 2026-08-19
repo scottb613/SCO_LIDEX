@@ -14,15 +14,29 @@ using System.Text.RegularExpressions;
 using MaxRev.Gdal.Core;
 using OSGeo.GDAL;
 using OSGeo.OGR;
+using OSGeo.OSR;
 using GdalDataset = OSGeo.GDAL.Dataset;
 
 namespace ORterr;
 
 internal static partial class Program
 {
-    private const int MapImageSize = 4096;
+    private static int MapImageSize = 2048;
     private const int MapTileParallelism = 2;
     private const string GeofabrikIndexUrl = "https://download.geofabrik.de/index-v1.json";
+    // Relation-safe route cut written during the first regional PBF scan. Maps
+    // and PolyVeg reuse this compact, spatially indexed source until either the
+    // regional source stamp or normal terrain footprint changes.
+    private const string RouteOsmWorkingCacheFileName = "route-osm-working.gpkg";
+    private const string RouteOsmWorkingManifestFileName = "route-osm-working.json";
+    private static readonly string[] RouteOsmWorkingFields =
+    [
+        "osm_type", "osm_id", "osm_way_id", "name", "natural", "landuse", "water", "waterway",
+        "wetland", "leaf_type", "leaf_cycle", "wood", "species", "building", "amenity",
+        "leisure", "aeroway", "military", "man_made", "highway", "railway", "service",
+        "surface", "tracktype", "bridge", "tunnel", "layer", "width", "lanes", "gauge",
+        "tourism", "shop", "other_tags",
+    ];
 
     private sealed record GeofabrikRegion(
         string Id,
@@ -51,6 +65,19 @@ internal static partial class Program
 
     private sealed record MapSourceAvailability(bool CanRun, bool CacheOnly, bool HasWarning, string Detail);
     private sealed record GeofabrikExtract(string Path, bool Downloaded);
+    private sealed record GeofabrikSourceSet(IReadOnlyList<GeofabrikResolution> Sources);
+    private sealed record RouteOsmWorkingManifest(
+        int SchemaVersion,
+        string SourcePath,
+        long SourceSizeBytes,
+        DateTime SourceModifiedUtc,
+        string TerrainTileFingerprint,
+        long CacheSizeBytes,
+        IReadOnlyList<RouteOsmWorkingSourceStamp>? Sources = null);
+    private sealed record RouteOsmWorkingSourceStamp(
+        string Path,
+        long SizeBytes,
+        DateTime ModifiedUtc);
 
     private static async Task RunMapTileProbeAsync(string[] args, CancellationToken cancellationToken)
     {
@@ -78,7 +105,9 @@ internal static partial class Program
             throw new InvalidOperationException("selected terrain tiles produce duplicate TSRE F3 map-cache names");
         }
         Console.WriteLine($"Map output probe: PASSED for {tiles.Count:N0} TSRE F3 terrain_maps PNG file(s); terrain materials and UVs will remain unchanged.");
-        MapSourceAvailability source = await ScanMapTileSourceAsync(route, mapper, tiles, cancellationToken);
+        bool ignoreWorkingCache = args.Contains("--ignore-working-cache", StringComparer.OrdinalIgnoreCase);
+        MapSourceAvailability source = await ScanMapTileSourceAsync(
+            route, mapper, tiles, cancellationToken, ignoreWorkingCache);
         if (!source.CanRun)
         {
             throw new InvalidOperationException(source.Detail);
@@ -89,7 +118,8 @@ internal static partial class Program
         RouteLayout route,
         GeoTileMapper mapper,
         IReadOnlyList<TerrainTile> selectedTiles,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool ignoreWorkingCache = false)
     {
         try
         {
@@ -102,9 +132,10 @@ internal static partial class Program
 
             using HttpClient client = CreateMapHttpClient(TimeSpan.FromSeconds(45));
             IReadOnlyList<(double Lon, double Lat)> coveragePoints = GetMapAndRouteCoveragePoints(mapper, selectedTiles, route.WorldTiles);
-            GeofabrikResolution resolution = await ResolveGeofabrikRegionAsync(client, route.RouteDir, mapper, coveragePoints, cacheOnly: false, cancellationToken);
+            GeofabrikResolution resolution = await ResolveGeofabrikRegionAsync(
+                client, route.RouteDir, mapper, coveragePoints, cacheOnly: false, cancellationToken);
             GeofabrikRegion region = resolution.Region;
-            Console.WriteLine("Map tiles: enabled; 4096x4096 image per normal 2048 m terrain tile.");
+            Console.WriteLine($"Map tiles: enabled; {MapImageSize}x{MapImageSize} image per normal 2048 m terrain tile.");
             Console.WriteLine($"Map source: Geofabrik {region.Name} ({region.Id}), anonymous regional OpenStreetMap PBF.");
             Console.WriteLine(resolution.CachedExtractAvailable
                 ? $"Map extract: existing route cache selected ({resolution.CachedExtractPath}); remote download not needed."
@@ -177,11 +208,14 @@ internal static partial class Program
         }
 
         using HttpClient client = CreateMapHttpClient(Timeout.InfiniteTimeSpan);
-        IReadOnlyList<(double Lon, double Lat)> coveragePoints = GetMapAndRouteCoveragePoints(mapper, tiles, route.WorldTiles);
-        GeofabrikResolution resolution = await ResolveGeofabrikRegionAsync(client, route.RouteDir, mapper, coveragePoints, cacheOnly, cancellationToken);
+        IReadOnlyList<(double Lon, double Lat)> coveragePoints = GetMapAndRouteCoveragePoints(
+            mapper, tiles, route.WorldTiles);
+        GeofabrikResolution resolution = await ResolveGeofabrikRegionAsync(
+            client, route.RouteDir, mapper, coveragePoints, cacheOnly, cancellationToken);
         if (!resolution.CanRun)
         {
-            throw new InvalidOperationException($"Geofabrik map source is unavailable and no usable cached extract exists: {resolution.Detail}");
+            throw new InvalidOperationException(
+                $"Geofabrik map source is unavailable and no usable cached extract exists: {resolution.Detail}");
         }
         GeofabrikRegion region = resolution.Region;
         GeofabrikExtract extract = await EnsureGeofabrikExtractAsync(
@@ -198,11 +232,34 @@ internal static partial class Program
         Console.WriteLine($"\nCreating {tiles.Count:N0} TSRE terrain map tile(s) from {region.Name}...");
         Console.WriteLine($"PBF cache: {pbfPath}");
         Console.WriteLine("STATUS: OSM - PROCESSING");
+        WriteOsmLogSection("OSM / POLYVEG PROCESSING");
+        WriteOsmLogBullet("This is a time-intensive operation.");
+        WriteOsmLogBullet("Completed work is checkpointed; long operations report every five minutes.");
+        WriteOsmLogSubsection("OSM SOURCE READING");
         ConfigureOsmRuntime();
         int completed = 0;
         int started = 0;
-        using GdalDataset dataSource = Gdal.OpenEx(pbfPath, (uint)(GdalConst.OF_VECTOR | GdalConst.OF_READONLY), null, null, null)
-            ?? throw new InvalidOperationException("GDAL could not open the Geofabrik .osm.pbf extract");
+        string? routeWorkingCache = FindCurrentRouteOsmWorkingCache(route, pbfPath);
+        if (routeWorkingCache is null)
+        {
+            WriteOsmLogSubsection("ROUTE OSM EXTRACTION");
+            WriteOsmLogEntry("Scanning the regional PBF once and carving a reusable route subset.");
+            routeWorkingCache = BuildRouteOsmWorkingCacheFromSources(
+                route,
+                mapper,
+                [pbfPath],
+                cancellationToken);
+        }
+        else
+        {
+            WriteOsmLogEntry($"Using current compact route OSM cache: {routeWorkingCache}");
+        }
+        WriteOsmLogSubsection("ROUTE FEATURE PROCESSING");
+        using GdalDataset dataSource = Gdal.OpenEx(
+            routeWorkingCache,
+            (uint)(GdalConst.OF_VECTOR | GdalConst.OF_READONLY),
+            null, null, null)
+            ?? throw new InvalidOperationException("GDAL could not open the compact route OSM cache");
         List<OsmPrimitive> mapGeometry = LoadOsmGeometry(
             dataSource,
             route,
@@ -211,10 +268,15 @@ internal static partial class Program
             pbfPath,
             extract.Downloaded,
             cancellationToken);
-        long pointCount = mapGeometry.Sum(p => (long)p.Points.Length);
+        long pointCount = mapGeometry.Sum(p =>
+            (long)p.Points.Length + p.InnerRings.Sum(ring => (long)ring.Length));
         long estimatedBytes = (pointCount * 16L) + (mapGeometry.Count * 96L);
-        Console.WriteLine($"OSM geometry retained for the complete run: {tiles.Count:N0} tile(s), {mapGeometry.Count:N0} geometry part(s), {pointCount:N0} points, estimated geometry memory {FormatByteCount(estimatedBytes)}.");
+        WriteOsmLogEntry(
+            $"Retained: {mapGeometry.Count:N0} geometry parts; {pointCount:N0} points; {FormatByteCount(estimatedBytes)} memory.");
         Console.WriteLine("STATUS: OSM - MAKING MAPS");
+        WriteOsmLogSection("MAP TILE RENDERING");
+        WriteOsmLogEntry($"Rendering {tiles.Count:N0} aligned TSRE map tiles.");
+        int sequenceWidth = tiles.Count.ToString(CultureInfo.InvariantCulture).Length;
 
         await Parallel.ForEachAsync(
             tiles,
@@ -235,11 +297,12 @@ internal static partial class Program
 
             try
             {
-                Console.WriteLine($"  [{sequence:N0}/{tiles.Count:N0}] {baseName}: rendering aligned OSM geometry...");
+                WriteOsmLogEntry(
+                    $"[{sequence.ToString().PadLeft(sequenceWidth)}/{tiles.Count}] {baseName} — rendering.");
                 using Bitmap bitmap = RenderMapBitmap(mapGeometry, mapper, worldTile, tileCancellationToken, out int renderedParts);
-                Console.WriteLine(renderedParts > 0
-                    ? $"    Rendered OSM geometry parts: {renderedParts:N0}"
-                    : "    No mapped OSM features in this tile; applying the TSRE map background.");
+                WriteOsmLogEntry(renderedParts > 0
+                    ? $"[{sequence.ToString().PadLeft(sequenceWidth)}/{tiles.Count}] {baseName} — {renderedParts:N0} geometry parts."
+                    : $"[{sequence.ToString().PadLeft(sequenceWidth)}/{tiles.Count}] {baseName} — background only.");
                 bitmap.Save(pngTemp, ImageFormat.Png);
 
                 File.Move(pngTemp, pngPath, overwrite: true);
@@ -252,8 +315,9 @@ internal static partial class Program
             return ValueTask.CompletedTask;
         });
 
-        Console.WriteLine($"Map tiles complete: {completed:N0} TSRE F3 PNG cache file(s) created; terrain .t files unchanged.");
-        Console.WriteLine("Existing F3 PNG cache files with matching tile names were overwritten.");
+        WriteOsmLogSection("OSM / MAP RESULTS");
+        WriteOsmLogEntry($"Created {completed:N0} TSRE F3 PNG map files.");
+        WriteOsmLogEntry("Existing matching PNG files replaced; terrain files unchanged.");
         Console.WriteLine("STATUS: OSM / MAPS - COMPLETE");
     }
 
@@ -269,7 +333,7 @@ internal static partial class Program
     private static HttpClient CreateMapHttpClient(TimeSpan timeout)
     {
         HttpClient client = new() { Timeout = timeout };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.200 (Open Rails terrain builder)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.300 (Open Rails terrain builder)");
         return client;
     }
 
@@ -472,6 +536,163 @@ internal static partial class Program
                 null,
                 $"Geofabrik PBF request failed: {ex.Message}");
         }
+    }
+
+    private static async Task<GeofabrikSourceSet> ResolveGeofabrikSourceSetAsync(
+        HttpClient client,
+        string routeDir,
+        GeoTileMapper mapper,
+        IReadOnlyList<(double Lon, double Lat)> coveragePoints,
+        bool cacheOnly,
+        CancellationToken cancellationToken)
+    {
+        GeofabrikResolution fallback = await ResolveGeofabrikRegionAsync(
+            client, routeDir, mapper, coveragePoints, cacheOnly, cancellationToken);
+        string indexPath = Path.Combine(GetMapCacheDirectory(), "geofabrik-index-v1.json");
+        if (!File.Exists(indexPath)) return new GeofabrikSourceSet([fallback]);
+
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(indexPath));
+        List<(GeofabrikRegion Region, JsonElement Geometry)> relevantExtracts = [];
+        foreach (JsonElement feature in document.RootElement.GetProperty("features").EnumerateArray())
+        {
+            JsonElement properties = feature.GetProperty("properties");
+            string id = properties.GetProperty("id").GetString() ?? "";
+            if (!properties.TryGetProperty("urls", out JsonElement urls) ||
+                !urls.TryGetProperty("pbf", out JsonElement pbf))
+            {
+                continue;
+            }
+            (double minLon, double minLat, double maxLon, double maxLat) =
+                GetJsonGeometryEnvelope(feature.GetProperty("geometry"));
+            JsonElement geometry = feature.GetProperty("geometry").Clone();
+            if (coveragePoints.Any(point =>
+                    point.Lon >= minLon && point.Lon <= maxLon &&
+                    point.Lat >= minLat && point.Lat <= maxLat &&
+                    JsonGeometryContains(geometry, point.Lon, point.Lat)))
+            {
+                string name = properties.TryGetProperty("name", out JsonElement nameElement)
+                    ? nameElement.GetString() ?? id
+                    : id;
+                relevantExtracts.Add((
+                    new GeofabrikRegion(id, name, pbf.GetString()!, 0, null,
+                        minLon, minLat, maxLon, maxLat),
+                    geometry));
+            }
+        }
+        if (relevantExtracts.Count == 0)
+        {
+            return new GeofabrikSourceSet([fallback]);
+        }
+
+        var coverageCandidates = relevantExtracts
+            .Select(extract => new
+            {
+                Extract = extract,
+                Area = Math.Max(1e-12,
+                    (extract.Region.MaxLon - extract.Region.MinLon) *
+                    (extract.Region.MaxLat - extract.Region.MinLat)),
+                Covers = coveragePoints
+                    .Select(point => JsonGeometryContains(
+                        extract.Geometry, point.Lon, point.Lat))
+                    .ToArray(),
+            })
+            .GroupBy(candidate => string.Concat(candidate.Covers.Select(value => value ? '1' : '0')),
+                StringComparer.Ordinal)
+            .Select(group => group.OrderBy(candidate => candidate.Area).First())
+            .ToList();
+
+        bool[] uncovered = Enumerable.Repeat(true, coveragePoints.Count).ToArray();
+        List<int> selectedIndexes = [];
+        while (uncovered.Any(value => value))
+        {
+            int bestIndex = -1;
+            double bestCost = double.PositiveInfinity;
+            int bestNewCoverage = 0;
+            for (int index = 0; index < coverageCandidates.Count; index++)
+            {
+                if (selectedIndexes.Contains(index)) continue;
+                int newlyCovered = 0;
+                for (int point = 0; point < uncovered.Length; point++)
+                {
+                    if (uncovered[point] && coverageCandidates[index].Covers[point]) newlyCovered++;
+                }
+                if (newlyCovered == 0) continue;
+                double cost = coverageCandidates[index].Area / newlyCovered;
+                if (cost < bestCost ||
+                    (Math.Abs(cost - bestCost) < 1e-12 && newlyCovered > bestNewCoverage))
+                {
+                    bestIndex = index;
+                    bestCost = cost;
+                    bestNewCoverage = newlyCovered;
+                }
+            }
+            if (bestIndex < 0) return new GeofabrikSourceSet([fallback]);
+            selectedIndexes.Add(bestIndex);
+            for (int point = 0; point < uncovered.Length; point++)
+            {
+                if (coverageCandidates[bestIndex].Covers[point]) uncovered[point] = false;
+            }
+        }
+
+        // Remove any extract made redundant by later selections.
+        for (int selected = selectedIndexes.Count - 1; selected >= 0; selected--)
+        {
+            int candidateToRemove = selectedIndexes[selected];
+            bool stillCovered = Enumerable.Range(0, coveragePoints.Count).All(point =>
+                selectedIndexes.Any(index => index != candidateToRemove &&
+                    coverageCandidates[index].Covers[point]));
+            if (stillCovered) selectedIndexes.RemoveAt(selected);
+        }
+        List<(GeofabrikRegion Region, JsonElement Geometry)> selectedExtracts = selectedIndexes
+            .Select(index => coverageCandidates[index].Extract)
+            .ToList();
+
+        List<GeofabrikResolution> resolutions = [];
+        foreach ((GeofabrikRegion indexedRegion, _) in selectedExtracts.OrderBy(extract => extract.Region.Id, StringComparer.Ordinal))
+        {
+            string routePath = GetRouteGeofabrikExtractPath(routeDir, indexedRegion.Id);
+            if (IsUsableCacheFile(routePath))
+            {
+                FileInfo cached = new(routePath);
+                resolutions.Add(new GeofabrikResolution(
+                    indexedRegion with { SizeBytes = cached.Length, Modified = cached.LastWriteTimeUtc },
+                    fallback.RemoteIndexAvailable, false, true, routePath,
+                    "using current-route regional extract"));
+                continue;
+            }
+            if (cacheOnly)
+            {
+                resolutions.Add(new GeofabrikResolution(
+                    indexedRegion, fallback.RemoteIndexAvailable, false, false, null,
+                    "regional extract is not cached"));
+                continue;
+            }
+            try
+            {
+                using HttpRequestMessage head = new(HttpMethod.Head, indexedRegion.PbfUrl);
+                using HttpResponseMessage response = await client.SendAsync(
+                    head, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                resolutions.Add(new GeofabrikResolution(
+                    indexedRegion with
+                    {
+                        SizeBytes = response.Content.Headers.ContentLength ?? 0,
+                        Modified = response.Content.Headers.LastModified,
+                    },
+                    fallback.RemoteIndexAvailable, true, false, null,
+                    "remote regional extract is available"));
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                resolutions.Add(new GeofabrikResolution(
+                    indexedRegion, fallback.RemoteIndexAvailable, false, false, null,
+                    $"regional extract request failed: {ex.Message}"));
+            }
+        }
+        Console.WriteLine(
+            "Geofabrik source selection: smallest covering global extract set is " +
+            string.Join(" + ", selectedExtracts.Select(extract => extract.Region.Name)) + ".");
+        return new GeofabrikSourceSet(resolutions);
     }
 
     private static IReadOnlyList<(double Lon, double Lat)> GetMapCoveragePoints(
@@ -710,7 +931,479 @@ internal static partial class Program
         public bool Fill => FillColor != Color.Empty;
     }
     private readonly record struct OsmPoint(double Longitude, double Latitude);
-    private sealed record OsmPrimitive(OsmStyle Style, OsmPoint[] Points, double MinLon, double MinLat, double MaxLon, double MaxLat);
+    private sealed record OsmPrimitive(
+        OsmStyle Style,
+        string SourceSortKey,
+        int SourcePartSequence,
+        OsmPoint[] Points,
+        OsmPoint[][] InnerRings,
+        bool IsPolygon,
+        double MinLon,
+        double MinLat,
+        double MaxLon,
+        double MaxLat);
+
+    private sealed record PolyVegClassification(
+        string Category,
+        string StyleId,
+        int DrawOrder,
+        int FillRed,
+        int FillGreen,
+        int FillBlue);
+
+    private static void WriteOsmLogSection(string title)
+    {
+        string heading = title.Trim().ToUpperInvariant();
+        Console.WriteLine();
+        Console.WriteLine(heading);
+        Console.WriteLine(new string('-', heading.Length));
+    }
+
+    private static void WriteOsmLogSubsection(string title)
+    {
+        string heading = title.Trim().ToUpperInvariant();
+        Console.WriteLine();
+        Console.WriteLine($"  {heading}");
+        Console.WriteLine($"  {new string('-', heading.Length)}");
+    }
+
+    private static void WriteOsmLogBullet(string message)
+    {
+        Console.WriteLine($"  • {message}");
+    }
+
+    private static void WriteOsmLogEntry(string message, int indent = 2)
+    {
+        int safeIndent = Math.Max(0, indent);
+        string bullet = safeIndent >= 4 ? "• " : "";
+        Console.WriteLine($"{new string(' ', safeIndent)}{bullet}[{DateTime.Now:HH:mm:ss}] {message}");
+    }
+
+    private sealed class ProcessingCheckpoints
+    {
+        private readonly int total;
+        private readonly int interval;
+        private int nextCheckpoint;
+        private int lastReported = -1;
+
+        internal ProcessingCheckpoints(int totalItems)
+        {
+            total = Math.Max(0, totalItems);
+            interval = Math.Max(1, (total + 9) / 10);
+            nextCheckpoint = interval;
+        }
+
+        internal void Report(int completed, string description)
+        {
+            if (completed == lastReported) return;
+            if (total == 0 || (completed < nextCheckpoint && completed < total)) return;
+            WriteOsmLogEntry($"{description}: {Math.Min(completed, total):N0} / {total:N0}.", indent: 4);
+            lastReported = completed;
+            while (nextCheckpoint <= completed)
+            {
+                nextCheckpoint += interval;
+            }
+        }
+    }
+
+    private sealed class ProcessingHeartbeat : IDisposable
+    {
+        private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromMinutes(5);
+        private readonly string task;
+        private readonly System.Threading.Timer timer;
+        private int finished;
+
+        internal ProcessingHeartbeat(string taskDescription)
+        {
+            task = taskDescription;
+            WriteOsmLogEntry($"{task}...");
+            timer = new System.Threading.Timer(
+                _ => WriteHeartbeat(), null, HeartbeatInterval, HeartbeatInterval);
+        }
+
+        internal void Complete()
+        {
+            if (Interlocked.Exchange(ref finished, 1) != 0) return;
+            timer.Dispose();
+            WriteOsmLogEntry($"{task} complete.");
+        }
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref finished, 1);
+            timer.Dispose();
+        }
+
+        private void WriteHeartbeat()
+        {
+            if (Volatile.Read(ref finished) != 0) return;
+            WriteOsmLogEntry($"Still processing: {task}.", indent: 4);
+        }
+    }
+
+    private static string? FindCurrentRouteOsmWorkingCache(RouteLayout route, string sourcePath)
+    {
+        string osmDirectory = GetRouteOsmDirectory(route.RouteDir);
+        string cachePath = Path.Combine(osmDirectory, RouteOsmWorkingCacheFileName);
+        string manifestPath = Path.Combine(osmDirectory, RouteOsmWorkingManifestFileName);
+        if (!File.Exists(cachePath) || !File.Exists(manifestPath) || !File.Exists(sourcePath)) return null;
+        try
+        {
+            RouteOsmWorkingManifest? manifest = JsonSerializer.Deserialize<RouteOsmWorkingManifest>(
+                File.ReadAllText(manifestPath));
+            FileInfo source = new(sourcePath);
+            string fingerprint = RoutePolyVegGeodataBuilder.GetRouteCoverageFingerprint(route);
+            if (manifest is null || manifest.SchemaVersion != 4 ||
+                !string.Equals(Path.GetFullPath(manifest.SourcePath), source.FullName, StringComparison.OrdinalIgnoreCase) ||
+                manifest.SourceSizeBytes != source.Length ||
+                manifest.SourceModifiedUtc != source.LastWriteTimeUtc ||
+                manifest.CacheSizeBytes != new FileInfo(cachePath).Length ||
+                !string.Equals(manifest.TerrainTileFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            return cachePath;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"Route working OSM cache could not be validated: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static string? FindUsableRouteOsmWorkingCache(RouteLayout route)
+    {
+        string osmDirectory = GetRouteOsmDirectory(route.RouteDir);
+        string cachePath = Path.Combine(osmDirectory, RouteOsmWorkingCacheFileName);
+        string manifestPath = Path.Combine(osmDirectory, RouteOsmWorkingManifestFileName);
+        if (!File.Exists(cachePath) || !File.Exists(manifestPath)) return null;
+        try
+        {
+            RouteOsmWorkingManifest? manifest = JsonSerializer.Deserialize<RouteOsmWorkingManifest>(
+                File.ReadAllText(manifestPath));
+            string fingerprint = RoutePolyVegGeodataBuilder.GetRouteCoverageFingerprint(route);
+            if (manifest is null || manifest.SchemaVersion != 4 ||
+                manifest.CacheSizeBytes != new FileInfo(cachePath).Length ||
+                !string.Equals(manifest.TerrainTileFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            using DataSource? probe = Ogr.Open(cachePath, 0);
+            return probe is not null && probe.GetLayerCount() > 0 ? cachePath : null;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"Compact route OSM cache could not be validated: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static bool RouteOsmWorkingSourceNeedsRefresh(RouteLayout route)
+    {
+        string manifestPath = Path.Combine(
+            GetRouteOsmDirectory(route.RouteDir), RouteOsmWorkingManifestFileName);
+        try
+        {
+            if (!File.Exists(manifestPath)) return true;
+            RouteOsmWorkingManifest? manifest = JsonSerializer.Deserialize<RouteOsmWorkingManifest>(
+                File.ReadAllText(manifestPath));
+            if (manifest is null) return true;
+            IReadOnlyList<RouteOsmWorkingSourceStamp> sources = manifest.Sources is { Count: > 0 }
+                ? manifest.Sources
+                : [new RouteOsmWorkingSourceStamp(
+                    manifest.SourcePath, manifest.SourceSizeBytes, manifest.SourceModifiedUtc)];
+            return sources.Any(stamp =>
+            {
+                if (!File.Exists(stamp.Path)) return true;
+                FileInfo source = new(stamp.Path);
+                return source.Length != stamp.SizeBytes || source.LastWriteTimeUtc != stamp.ModifiedUtc;
+            });
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"Compact route OSM source status could not be checked: {ex.Message}");
+            return true;
+        }
+    }
+
+    private static string BuildRouteOsmWorkingCacheFromSources(
+        RouteLayout route,
+        GeoTileMapper mapper,
+        IReadOnlyList<string> sourcePaths,
+        CancellationToken cancellationToken)
+    {
+        using Geometry extractionCoverage = BuildRouteOsmExtractionCoverage(route, mapper);
+        Envelope extractionEnvelope = new();
+        extractionCoverage.GetEnvelope(extractionEnvelope);
+        using ProcessingHeartbeat stage = new(
+            "Extracting compact route geometry from the regional OSM source");
+        using RouteOsmWorkingCacheWriter writer = new(
+            route, sourcePaths[0], extractionCoverage, cancellationToken, sourcePaths);
+        foreach (string sourcePath in sourcePaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            WriteOsmLogEntry($"Regional source: {sourcePath}");
+            using GdalDataset source = Gdal.OpenEx(
+                sourcePath,
+                (uint)(GdalConst.OF_VECTOR | GdalConst.OF_READONLY),
+                null, null, null)
+                ?? throw new InvalidOperationException($"GDAL could not open regional OSM source: {sourcePath}");
+            for (int index = 0; index < source.GetLayerCount(); index++)
+            {
+                using Layer layer = source.GetLayer(index);
+                if (string.Equals(layer.GetName(), "points", StringComparison.OrdinalIgnoreCase)) continue;
+                layer.SetSpatialFilterRect(
+                    extractionEnvelope.MinX,
+                    extractionEnvelope.MinY,
+                    extractionEnvelope.MaxX,
+                    extractionEnvelope.MaxY);
+            }
+            source.ResetReading();
+            double progress = 0;
+            IntPtr layerHandle = IntPtr.Zero;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                using Feature? feature = source.GetNextFeature(ref layerHandle, ref progress, null!, "");
+                if (feature is null) break;
+                using Geometry? geometry = feature.GetGeometryRef();
+                if (geometry is not null) writer.Add(feature, geometry);
+            }
+        }
+        writer.Complete();
+        stage.Complete();
+        return FindUsableRouteOsmWorkingCache(route)
+            ?? throw new InvalidDataException("the compact multi-source route OSM cache failed validation");
+    }
+
+    private static Geometry BuildRouteOsmExtractionCoverage(
+        RouteLayout route,
+        GeoTileMapper mapper)
+    {
+        using Geometry tilePolygons = new(wkbGeometryType.wkbMultiPolygon);
+        foreach (WorldTile tile in RoutePolyVegGeodataBuilder.GetRouteCoverageTiles(route))
+        {
+            GeoSampleGrid corners = mapper.GetAreaSampleGrid(
+                tile.X, tile.Z, OrtsTileSizeMeters, OrtsTileSizeMeters, 2);
+            using Geometry ring = new(wkbGeometryType.wkbLinearRing);
+            ring.AddPoint_2D(corners.Longitudes[1, 0], corners.Latitudes[1, 0]);
+            ring.AddPoint_2D(corners.Longitudes[1, 1], corners.Latitudes[1, 1]);
+            ring.AddPoint_2D(corners.Longitudes[0, 1], corners.Latitudes[0, 1]);
+            ring.AddPoint_2D(corners.Longitudes[0, 0], corners.Latitudes[0, 0]);
+            ring.AddPoint_2D(corners.Longitudes[1, 0], corners.Latitudes[1, 0]);
+            using Geometry polygon = new(wkbGeometryType.wkbPolygon);
+            polygon.AddGeometry(ring);
+            tilePolygons.AddGeometry(polygon);
+        }
+        using Geometry exactCoverage = tilePolygons.UnionCascaded()
+            ?? throw new InvalidOperationException("GDAL could not combine route terrain coverage");
+
+        // Roughly 2.5-3.3 km at inhabited latitudes: safely exceeds the 2048 m
+        // context used for roads, waterways, and other permanent exclusions.
+        return exactCoverage.Buffer(0.03, 8)
+            ?? throw new InvalidOperationException("GDAL could not buffer route extraction coverage");
+    }
+
+    private sealed class RouteOsmWorkingCacheWriter : IDisposable
+    {
+        private readonly string sourcePath;
+        private readonly IReadOnlyList<string> sourcePaths;
+        private readonly string cachePath;
+        private readonly string temporaryCachePath;
+        private readonly string manifestPath;
+        private readonly string temporaryManifestPath;
+        private readonly string fingerprint;
+        private readonly CancellationToken cancellationToken;
+        private readonly Geometry extractionCoverage;
+        private readonly Envelope extractionEnvelope = new();
+        private readonly DataSource dataSource;
+        private readonly SpatialReference geographic;
+        private readonly Dictionary<string, Layer> layers = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> retainedFeatureKeys = new(StringComparer.Ordinal);
+        private bool completed;
+        private int featureCount;
+
+        internal RouteOsmWorkingCacheWriter(
+            RouteLayout route,
+            string pbfPath,
+            Geometry coverage,
+            CancellationToken token,
+            IReadOnlyList<string>? allSourcePaths = null)
+        {
+            sourcePath = Path.GetFullPath(pbfPath);
+            sourcePaths = (allSourcePaths ?? [pbfPath])
+                .Select(Path.GetFullPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            string osmDirectory = GetRouteOsmDirectory(route.RouteDir);
+            Directory.CreateDirectory(osmDirectory);
+            cachePath = Path.Combine(osmDirectory, RouteOsmWorkingCacheFileName);
+            temporaryCachePath = Path.Combine(osmDirectory, "route-osm-working.tmp.gpkg");
+            manifestPath = Path.Combine(osmDirectory, RouteOsmWorkingManifestFileName);
+            temporaryManifestPath = manifestPath + ".tmp";
+            fingerprint = RoutePolyVegGeodataBuilder.GetRouteCoverageFingerprint(route);
+            cancellationToken = token;
+            extractionCoverage = coverage.Clone();
+            extractionCoverage.GetEnvelope(extractionEnvelope);
+            if (File.Exists(temporaryCachePath)) File.Delete(temporaryCachePath);
+            if (File.Exists(temporaryManifestPath)) File.Delete(temporaryManifestPath);
+            OSGeo.OGR.Driver driver = Ogr.GetDriverByName("GPKG")
+                ?? throw new InvalidOperationException("bundled GDAL GeoPackage driver is unavailable");
+            dataSource = driver.CreateDataSource(temporaryCachePath, [])
+                ?? throw new InvalidOperationException("GDAL could not create the compact route OSM cache");
+            geographic = new SpatialReference("");
+            geographic.ImportFromEPSG(4326);
+            geographic.SetAxisMappingStrategy(AxisMappingStrategy.OAMS_TRADITIONAL_GIS_ORDER);
+        }
+
+        internal void Add(Feature source, Geometry geometry)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string layerName = source.GetDefnRef().GetName();
+            if (string.Equals(layerName, "points", StringComparison.OrdinalIgnoreCase)) return;
+            Envelope envelope = new();
+            geometry.GetEnvelope(envelope);
+            if (envelope.MaxX < extractionEnvelope.MinX || envelope.MinX > extractionEnvelope.MaxX ||
+                envelope.MaxY < extractionEnvelope.MinY || envelope.MinY > extractionEnvelope.MaxY)
+            {
+                return;
+            }
+            using Geometry? clipped = ClipToRouteExtractionCoverage(geometry);
+            if (clipped is null || clipped.IsEmpty()) return;
+            string featureKey = string.Create(
+                CultureInfo.InvariantCulture,
+                $"{layerName}|{StableOsmDrawSortKey(source)}|{envelope.MinX:F7}|{envelope.MinY:F7}|{envelope.MaxX:F7}|{envelope.MaxY:F7}");
+            if (!retainedFeatureKeys.Add(featureKey)) return;
+            if (!layers.TryGetValue(layerName, out Layer? layer))
+            {
+                layer = dataSource.CreateLayer(
+                    layerName,
+                    geographic,
+                    wkbGeometryType.wkbUnknown,
+                    ["SPATIAL_INDEX=YES"])
+                    ?? throw new InvalidOperationException($"could not create compact OSM layer {layerName}");
+                foreach (string fieldName in RouteOsmWorkingFields)
+                {
+                    using FieldDefn field = new(fieldName, FieldType.OFTString);
+                    field.SetWidth(fieldName == "other_tags" ? 0 : 254);
+                    if (layer.CreateField(field, 1) != 0)
+                        throw new InvalidOperationException($"could not create compact OSM field {layerName}.{fieldName}");
+                }
+                layers.Add(layerName, layer);
+            }
+
+            using Feature output = new(layer.GetLayerDefn());
+            foreach (string fieldName in RouteOsmWorkingFields)
+            {
+                string value = GetOgrField(source, fieldName);
+                if (!string.IsNullOrEmpty(value)) output.SetField(fieldName, value);
+            }
+            output.SetGeometry(clipped);
+            if (layer.CreateFeature(output) != 0)
+                throw new InvalidOperationException($"could not write compact OSM feature in {layerName}");
+            featureCount++;
+        }
+
+        private Geometry? ClipToRouteExtractionCoverage(Geometry geometry)
+        {
+            try
+            {
+                if (!geometry.Intersects(extractionCoverage)) return null;
+                return geometry.Intersection(extractionCoverage);
+            }
+            catch
+            {
+                using Geometry? repaired = geometry.MakeValid([]);
+                if (repaired is null || repaired.IsEmpty() ||
+                    !repaired.Intersects(extractionCoverage))
+                {
+                    return null;
+                }
+                return repaired.Intersection(extractionCoverage);
+            }
+        }
+
+        internal void Complete()
+        {
+            if (completed) return;
+            foreach (Layer layer in layers.Values) layer.SyncToDisk();
+            DisposeDataSource();
+            FileInfo source = new(sourcePath);
+            FileInfo compactCache = new(temporaryCachePath);
+            RouteOsmWorkingSourceStamp[] sourceStamps = sourcePaths
+                .Select(path => new FileInfo(path))
+                .Select(file => new RouteOsmWorkingSourceStamp(
+                    file.FullName, file.Length, file.LastWriteTimeUtc))
+                .ToArray();
+            RouteOsmWorkingManifest manifest = new(
+                4,
+                source.FullName,
+                source.Length,
+                source.LastWriteTimeUtc,
+                fingerprint,
+                compactCache.Length,
+                sourceStamps);
+            File.WriteAllText(
+                temporaryManifestPath,
+                JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }),
+                new UTF8Encoding(false));
+            string cacheBackupPath = cachePath + ".previous";
+            string manifestBackupPath = manifestPath + ".previous";
+            if (File.Exists(cacheBackupPath)) File.Delete(cacheBackupPath);
+            if (File.Exists(manifestBackupPath)) File.Delete(manifestBackupPath);
+            bool cacheBackedUp = false;
+            bool manifestBackedUp = false;
+            try
+            {
+                if (File.Exists(cachePath))
+                {
+                    File.Move(cachePath, cacheBackupPath);
+                    cacheBackedUp = true;
+                }
+                if (File.Exists(manifestPath))
+                {
+                    File.Move(manifestPath, manifestBackupPath);
+                    manifestBackedUp = true;
+                }
+                File.Move(temporaryCachePath, cachePath);
+                File.Move(temporaryManifestPath, manifestPath);
+                if (cacheBackedUp) File.Delete(cacheBackupPath);
+                if (manifestBackedUp) File.Delete(manifestBackupPath);
+            }
+            catch
+            {
+                if (File.Exists(cachePath)) File.Delete(cachePath);
+                if (File.Exists(manifestPath)) File.Delete(manifestPath);
+                if (cacheBackedUp && File.Exists(cacheBackupPath))
+                    File.Move(cacheBackupPath, cachePath);
+                if (manifestBackedUp && File.Exists(manifestBackupPath))
+                    File.Move(manifestBackupPath, manifestPath);
+                throw;
+            }
+            completed = true;
+            Console.WriteLine(
+                $"Compact route OSM cache complete: {featureCount:N0} applicable feature(s) saved to {cachePath}");
+        }
+
+        private void DisposeDataSource()
+        {
+            foreach (Layer layer in layers.Values) layer.Dispose();
+            layers.Clear();
+            dataSource.Dispose();
+            geographic.Dispose();
+            extractionCoverage.Dispose();
+        }
+
+        public void Dispose()
+        {
+            if (!completed)
+            {
+                DisposeDataSource();
+                if (File.Exists(temporaryCachePath)) File.Delete(temporaryCachePath);
+                if (File.Exists(temporaryManifestPath)) File.Delete(temporaryManifestPath);
+            }
+        }
+    }
 
     private static List<OsmPrimitive> LoadOsmGeometry(
         GdalDataset dataSource,
@@ -733,7 +1426,7 @@ internal static partial class Program
             maxLon = Math.Max(maxLon, tileMaxLon);
             maxLat = Math.Max(maxLat, tileMaxLat);
         }
-        using RouteForestDerivativeBuilder? geodataBuilder = RouteForestDerivativeBuilder.TryCreate(
+        using RoutePolyVegGeodataBuilder? geodataBuilder = RoutePolyVegGeodataBuilder.TryCreate(
             route,
             mapper,
             pbfPath,
@@ -763,46 +1456,138 @@ internal static partial class Program
             }
             layer.SetSpatialFilterRect(minLon - padLon, minLat - padLat, maxLon + padLon, maxLat + padLat);
         }
-        Console.WriteLine("OSM relation integrity: node stream unfiltered; completed geometry filtered to the terrain batch.");
+        WriteOsmLogEntry("Relation-safe read; completed geometry limited to route coverage.");
         dataSource.ResetReading();
         List<OsmPrimitive> primitives = [];
         double progress = 0;
+        int featuresRead = 0;
+        int nextReadPercent = 10;
         IntPtr layerHandle = IntPtr.Zero;
-        while (true)
+        using (ProcessingHeartbeat stage = new("Reading and classifying OSM features"))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            using Feature? feature = dataSource.GetNextFeature(ref layerHandle, ref progress, null!, "");
-            if (feature is null) break;
-            using Geometry? geometry = feature.GetGeometryRef();
-            if (geometry is null) continue;
-            geodataBuilder?.Collect(feature, geometry);
-            CollectOsmGeometry(geometry, GetOsmStyle(feature), primitives);
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                using Feature? feature = dataSource.GetNextFeature(ref layerHandle, ref progress, null!, "");
+                if (feature is null) break;
+                string layerName = feature.GetDefnRef().GetName();
+                // The OSM driver must consume its node/point stream to assemble
+                // complete ways and relations, but LIDEX neither exports nor
+                // renders standalone points. Avoid geometry wrappers, topology
+                // checks, tag classification, and styling for millions of nodes.
+                if (string.Equals(layerName, "points", StringComparison.OrdinalIgnoreCase))
+                {
+                    ReportOsmReadProgress(progress, featuresRead, ref nextReadPercent);
+                    continue;
+                }
+                using Geometry? geometry = feature.GetGeometryRef();
+                if (geometry is null) continue;
+                featuresRead++;
+                geodataBuilder?.Collect(feature, geometry);
+                int sourcePartSequence = 0;
+                CollectOsmGeometry(
+                    geometry, GetOsmStyle(feature), StableOsmDrawSortKey(feature),
+                    ref sourcePartSequence, primitives);
+                // GDAL can report 100% before its relation/feature stream is
+                // actually exhausted. Reserve the formal 100% checkpoint for EOF.
+                ReportOsmReadProgress(progress, featuresRead, ref nextReadPercent);
+            }
+            if (nextReadPercent <= 100)
+            {
+                WriteOsmLogEntry(
+                    $"OSM source read: 100% ({featuresRead:N0} route features classified).",
+                    indent: 4);
+            }
+            stage.Complete();
         }
         geodataBuilder?.WriteAndPromote();
-        primitives.Sort((left, right) => left.Style.DrawOrder.CompareTo(right.Style.DrawOrder));
+        primitives.Sort((left, right) =>
+        {
+            int order = left.Style.DrawOrder.CompareTo(right.Style.DrawOrder);
+            if (order != 0) return order;
+            order = StringComparer.Ordinal.Compare(left.SourceSortKey, right.SourceSortKey);
+            return order != 0 ? order : left.SourcePartSequence.CompareTo(right.SourcePartSequence);
+        });
         return primitives;
     }
 
-    private static void CollectOsmGeometry(Geometry geometry, OsmStyle style, List<OsmPrimitive> destination)
+    private static void ReportOsmReadProgress(double progress, int featuresRead, ref int nextReadPercent)
+    {
+        // GDAL can report 100% before its relation/feature stream is actually
+        // exhausted. Reserve the formal 100% checkpoint for EOF.
+        int readPercent = Math.Clamp((int)Math.Floor(progress * 100.0), 0, 99);
+        if (readPercent < nextReadPercent) return;
+        WriteOsmLogEntry(
+            $"OSM source read: {readPercent}% ({featuresRead:N0} route features classified).",
+            indent: 4);
+        while (nextReadPercent <= readPercent) nextReadPercent += 10;
+    }
+
+    private static void CollectOsmGeometry(
+        Geometry geometry,
+        OsmStyle style,
+        string sourceSortKey,
+        ref int sourcePartSequence,
+        List<OsmPrimitive> destination)
     {
         wkbGeometryType type = geometry.GetGeometryType();
         int childCount = geometry.GetGeometryCount();
+        if (type is wkbGeometryType.wkbPolygon or wkbGeometryType.wkbPolygon25D)
+        {
+            if (childCount == 0) return;
+            using Geometry exterior = geometry.GetGeometryRef(0);
+            OsmPoint[] exteriorPoints = ReadOsmPoints(exterior, minimumPoints: 3,
+                out double minLon, out double minLat, out double maxLon, out double maxLat);
+            if (exteriorPoints.Length == 0) return;
+            List<OsmPoint[]> innerRings = [];
+            for (int ringIndex = 1; ringIndex < childCount; ringIndex++)
+            {
+                using Geometry inner = geometry.GetGeometryRef(ringIndex);
+                OsmPoint[] points = ReadOsmPoints(inner, minimumPoints: 3,
+                    out _, out _, out _, out _);
+                if (points.Length > 0) innerRings.Add(points);
+            }
+            destination.Add(new OsmPrimitive(
+                style, sourceSortKey, sourcePartSequence++, exteriorPoints, innerRings.ToArray(), true,
+                minLon, minLat, maxLon, maxLat));
+            return;
+        }
         if (childCount > 0 && type is not wkbGeometryType.wkbLineString and not wkbGeometryType.wkbLinearRing)
         {
             for (int i = 0; i < childCount; i++)
             {
                 using Geometry child = geometry.GetGeometryRef(i);
-                CollectOsmGeometry(child, style, destination);
+                CollectOsmGeometry(child, style, sourceSortKey, ref sourcePartSequence, destination);
             }
             return;
         }
+        OsmPoint[] linePoints = ReadOsmPoints(geometry, minimumPoints: 2,
+            out double lineMinLon, out double lineMinLat, out double lineMaxLon, out double lineMaxLat);
+        if (linePoints.Length == 0) return;
+        destination.Add(new OsmPrimitive(
+            style, sourceSortKey, sourcePartSequence++, linePoints, [], false,
+            lineMinLon, lineMinLat, lineMaxLon, lineMaxLat));
+    }
+
+    private static OsmPoint[] ReadOsmPoints(
+        Geometry geometry,
+        int minimumPoints,
+        out double minLon,
+        out double minLat,
+        out double maxLon,
+        out double maxLat)
+    {
         int pointCount = geometry.GetPointCount();
-        if (pointCount < 2) return;
+        if (pointCount < minimumPoints)
+        {
+            minLon = minLat = maxLon = maxLat = 0.0;
+            return [];
+        }
         OsmPoint[] points = new OsmPoint[pointCount];
-        double minLon = double.PositiveInfinity;
-        double minLat = double.PositiveInfinity;
-        double maxLon = double.NegativeInfinity;
-        double maxLat = double.NegativeInfinity;
+        minLon = double.PositiveInfinity;
+        minLat = double.PositiveInfinity;
+        maxLon = double.NegativeInfinity;
+        maxLat = double.NegativeInfinity;
         for (int i = 0; i < pointCount; i++)
         {
             double lon = geometry.GetX(i);
@@ -813,7 +1598,18 @@ internal static partial class Program
             maxLon = Math.Max(maxLon, lon);
             maxLat = Math.Max(maxLat, lat);
         }
-        destination.Add(new OsmPrimitive(style, points, minLon, minLat, maxLon, maxLat));
+        return points;
+    }
+
+    private static string StableOsmDrawSortKey(Feature feature)
+    {
+        string osmId = GetOgrField(feature, "osm_id");
+        if (!string.IsNullOrWhiteSpace(osmId))
+            return osmId.Contains('/') ? osmId.Trim() : "relation/" + osmId.Trim();
+        string osmWayId = GetOgrField(feature, "osm_way_id");
+        if (!string.IsNullOrWhiteSpace(osmWayId))
+            return osmWayId.Contains('/') ? osmWayId.Trim() : "way/" + osmWayId.Trim();
+        return "fid/" + feature.GetFID().ToString("D20", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static OsmStyle GetOsmStyle(Feature feature)
@@ -836,44 +1632,26 @@ internal static partial class Program
         // their water polygons instead of being obscured by adjacent land use.
         if (!string.IsNullOrEmpty(building)) return FillStyle(190, 173, 173, TsreDrawOrder(1), 169, 148, 165);
         if (!string.IsNullOrEmpty(shop)) return FillStyle(200, 170, 170, TsreDrawOrder(1), 169, 148, 165);
-        if (natural == "wood") return FillStyle(141, 196, 108, TsreDrawOrder(7));
-        if (landuse is "forest" or "wood") return FillStyle(133, 193, 133, TsreDrawOrder(7));
+        if (natural == "tree_row") return LineStyle(133, 193, 133, 8, TsreDrawOrder(6));
+        PolyVegClassification? polyVeg = GetPolyVegClassification(feature);
+        if (polyVeg is not null)
+            return FillStyle(polyVeg.FillRed, polyVeg.FillGreen, polyVeg.FillBlue, polyVeg.DrawOrder);
         if (natural == "water") return FillStyle(181, 208, 208, TsreDrawOrder(6));
         if (natural == "bay") return FillStyle(181, 208, 208, TsreDrawOrder(7));
         if (landuse == "reservoir") return FillStyle(181, 208, 208, TsreDrawOrder(5));
         if (landuse == "basin") return FillStyle(181, 208, 208, TsreDrawOrder(6));
-        if (natural == "scrub") return FillStyle(181, 226, 181, TsreDrawOrder(7));
-        if (natural == "wetland") return FillStyle(95, 180, 160, TsreDrawOrder(7));
-        if (natural == "heath") return FillStyle(213, 216, 159, TsreDrawOrder(7));
         if (natural == "beach") return FillStyle(254, 240, 186, TsreDrawOrder(6));
-        if (natural == "grassland") return FillStyle(198, 228, 180, TsreDrawOrder(7));
-        if (landuse is "grass" or "village_green" or "recreation_ground" or "meadow") return FillStyle(207, 236, 168, TsreDrawOrder(7));
-        if (landuse == "farmland") return FillStyle(233, 216, 189, TsreDrawOrder(8));
-        if (landuse == "farmyard") return FillStyle(220, 190, 146, TsreDrawOrder(6));
-        if (landuse == "farm") return FillStyle(234, 216, 184, TsreDrawOrder(7));
-        if (landuse == "orchard") return FillStyle(207, 255, 168, TsreDrawOrder(7));
         if (landuse is "industrial" or "railway") return FillStyle(222, 208, 213, TsreDrawOrder(7));
         if (landuse == "commercial") return FillStyle(238, 200, 200, TsreDrawOrder(7));
         if (landuse == "retail") return FillStyle(234, 214, 214, TsreDrawOrder(7));
         if (landuse == "residential") return FillStyle(220, 220, 220, TsreDrawOrder(8));
         if (landuse == "quarry") return FillStyle(195, 195, 195, TsreDrawOrder(7));
-        if (landuse == "cemetery") return FillStyle(151, 191, 164, TsreDrawOrder(7));
         if (landuse == "garages") return FillStyle(224, 224, 206, TsreDrawOrder(6));
-        if (landuse == "greenhouse_horticulture") return FillStyle(231, 241, 222, TsreDrawOrder(6));
-        if (landuse is "plant_nursery" or "allotments") return FillStyle(204, 220, 112, TsreDrawOrder(7));
         if (landuse == "landfill") return FillStyle(176, 176, 142, TsreDrawOrder(6));
         if (landuse is "construction" or "greenfield" or "brownfield") return FillStyle(176, 176, 142, TsreDrawOrder(7));
         if (amenity == "parking") return FillStyle(246, 238, 182, TsreDrawOrder(5));
         if (amenity == "school") return FillStyle(240, 240, 216, TsreDrawOrder(6), 210, 180, 160);
         if (amenity == "place_of_worship") return FillStyle(220, 130, 110, TsreDrawOrder(2), 150, 150, 150);
-        if (leisure is "sports_centre" or "park") return FillStyle(206, 246, 202, TsreDrawOrder(7));
-        if (leisure == "stadium") return FillStyle(206, 246, 202, TsreDrawOrder(5));
-        if (leisure == "pitch") return FillStyle(137, 210, 174, TsreDrawOrder(4), 180, 180, 180);
-        if (leisure == "track") return FillStyle(116, 219, 185, TsreDrawOrder(6), 180, 180, 180);
-        if (leisure == "playground") return FillStyle(204, 254, 254, TsreDrawOrder(4), 180, 180, 180);
-        if (leisure == "common") return FillStyle(199, 241, 163, TsreDrawOrder(5), 148, 214, 151);
-        if (leisure == "garden") return FillStyle(199, 241, 163, TsreDrawOrder(6), 148, 214, 151);
-        if (leisure == "golf_course") return FillStyle(199, 241, 163, TsreDrawOrder(5), 148, 214, 151);
         if (aeroway == "terminal") return FillStyle(204, 153, 254, TsreDrawOrder(1), 154, 117, 182);
         if (aeroway is "runway" or "taxiway") return LineStyle(187, 187, 204, 10, TsreDrawOrder(4, 1));
         if (!string.IsNullOrEmpty(waterway)) return LineStyle(181, 208, 208, 10, TsreDrawOrder(6, 1));
@@ -910,6 +1688,40 @@ internal static partial class Program
         return LineStyle(50, 50, 50, 1, 50);
     }
 
+    private static PolyVegClassification? GetPolyVegClassification(Feature feature)
+    {
+        string natural = GetOgrField(feature, "natural").Trim().ToLowerInvariant();
+        string landuse = GetOgrField(feature, "landuse").Trim().ToLowerInvariant();
+        string leisure = GetOgrField(feature, "leisure").Trim().ToLowerInvariant();
+        string tourism = GetOgrField(feature, "tourism").Trim().ToLowerInvariant();
+        if (natural == "wood") return new("woodland", "natural=wood", TsreDrawOrder(7), 141, 196, 108);
+        if (landuse is "forest" or "wood") return new("woodland", $"landuse={landuse}", TsreDrawOrder(7), 133, 193, 133);
+        if (natural == "scrub") return new("scrub", "natural=scrub", TsreDrawOrder(7), 181, 226, 181);
+        if (natural == "wetland") return new("wetland", "natural=wetland", TsreDrawOrder(7), 95, 180, 160);
+        if (natural == "heath") return new("heath", "natural=heath", TsreDrawOrder(7), 213, 216, 159);
+        if (natural == "grassland") return new("grassland", "natural=grassland", TsreDrawOrder(7), 198, 228, 180);
+        if (landuse is "grass" or "meadow" or "pasture") return new("grassland", $"landuse={landuse}", TsreDrawOrder(7), 207, 236, 168);
+        if (landuse == "farmland") return new("agriculture", "landuse=farmland", TsreDrawOrder(8), 233, 216, 189);
+        if (landuse == "farmyard") return new("agriculture", "landuse=farmyard", TsreDrawOrder(6), 220, 190, 146);
+        if (landuse == "farm") return new("agriculture", "landuse=farm", TsreDrawOrder(7), 234, 216, 184);
+        if (landuse == "greenhouse_horticulture") return new("agriculture", "landuse=greenhouse_horticulture", TsreDrawOrder(6), 231, 241, 222);
+        if (landuse is "orchard" or "vineyard") return new("orchard", $"landuse={landuse}", TsreDrawOrder(7), 207, 255, 168);
+        if (landuse is "plant_nursery" or "allotments") return new("orchard", $"landuse={landuse}", TsreDrawOrder(7), 204, 220, 112);
+        if (landuse is "village_green" or "recreation_ground") return new("parkland", $"landuse={landuse}", TsreDrawOrder(7), 207, 236, 168);
+        if (leisure == "park") return new("parkland", "leisure=park", TsreDrawOrder(7), 206, 246, 202);
+        if (leisure == "common") return new("parkland", "leisure=common", TsreDrawOrder(5), 199, 241, 163);
+        if (leisure == "garden") return new("parkland", "leisure=garden", TsreDrawOrder(6), 199, 241, 163);
+        if (leisure == "golf_course") return new("golf_course", "leisure=golf_course", TsreDrawOrder(5), 199, 241, 163);
+        if (landuse == "cemetery") return new("cemetery", "landuse=cemetery", TsreDrawOrder(7), 151, 191, 164);
+        if (leisure == "sports_centre") return new("sports", "leisure=sports_centre", TsreDrawOrder(7), 206, 246, 202);
+        if (leisure == "stadium") return new("sports", "leisure=stadium", TsreDrawOrder(5), 206, 246, 202);
+        if (leisure == "pitch") return new("sports", "leisure=pitch", TsreDrawOrder(4), 137, 210, 174);
+        if (leisure == "track") return new("sports", "leisure=track", TsreDrawOrder(6), 116, 219, 185);
+        if (leisure == "playground") return new("sports", "leisure=playground", TsreDrawOrder(4), 204, 254, 254);
+        if (tourism == "zoo") return new("zoo", "tourism=zoo", TsreDrawOrder(6), 164, 242, 161);
+        return null;
+    }
+
     private static int TsreDrawOrder(int osmLayer, int withinLayer = 0)
         => ((9 - Math.Clamp(osmLayer, 0, 9)) * 10) + withinLayer;
 
@@ -930,30 +1742,94 @@ internal static partial class Program
 
     private static int DrawOsmPrimitive(Graphics graphics, GeoTileMapper mapper, WorldTile tile, OsmPrimitive primitive)
     {
-        int pointCount = primitive.Points.Length;
-        PointF[] points = new PointF[pointCount];
-        for (int i = 0; i < pointCount; i++)
-        {
-            (double x, double y) = mapper.ProjectToTilePixel(tile, primitive.Points[i].Longitude, primitive.Points[i].Latitude, MapImageSize);
-            points[i] = new PointF((float)x, (float)y);
-        }
-        if (primitive.Style.Fill && pointCount >= 3)
+        PointF[] points = ProjectOsmRing(mapper, tile, primitive.Points);
+        if (primitive.IsPolygon && primitive.Style.Fill && points.Length >= 3)
         {
             using SolidBrush brush = new(primitive.Style.FillColor);
-            graphics.FillPolygon(brush, points, FillMode.Winding);
+            using GraphicsPath path = new(FillMode.Alternate);
+            path.AddPolygon(points);
+            foreach (OsmPoint[] innerRing in primitive.InnerRings)
+            {
+                PointF[] innerPoints = ProjectOsmRing(mapper, tile, innerRing);
+                if (innerPoints.Length >= 3) path.AddPolygon(innerPoints);
+            }
+            graphics.FillPath(brush, path);
         }
         if (primitive.Style.CasingColor != Color.Empty && primitive.Style.CasingWidth > 0)
         {
             using Pen casing = new(primitive.Style.CasingColor, primitive.Style.CasingWidth) { LineJoin = LineJoin.Round, StartCap = LineCap.Flat, EndCap = LineCap.Flat };
-            graphics.DrawLines(casing, points);
+            if (primitive.IsPolygon) graphics.DrawPolygon(casing, points);
+            else graphics.DrawLines(casing, points);
         }
         if (primitive.Style.StrokeColor != Color.Empty && primitive.Style.StrokeWidth > 0)
         {
             using Pen pen = new(primitive.Style.StrokeColor, primitive.Style.StrokeWidth) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
-            if (primitive.Style.Fill && pointCount >= 3) graphics.DrawPolygon(pen, points);
+            if (primitive.IsPolygon && points.Length >= 3)
+            {
+                graphics.DrawPolygon(pen, points);
+                foreach (OsmPoint[] innerRing in primitive.InnerRings)
+                {
+                    PointF[] innerPoints = ProjectOsmRing(mapper, tile, innerRing);
+                    if (innerPoints.Length >= 3) graphics.DrawPolygon(pen, innerPoints);
+                }
+            }
             else graphics.DrawLines(pen, points);
         }
         return 1;
+    }
+
+    private static PointF[] ProjectOsmRing(GeoTileMapper mapper, WorldTile tile, OsmPoint[] ring)
+    {
+        PointF[] points = new PointF[ring.Length];
+        for (int i = 0; i < ring.Length; i++)
+        {
+            (double x, double y) = mapper.ProjectToTilePixel(
+                tile, ring[i].Longitude, ring[i].Latitude, MapImageSize);
+            points[i] = new PointF((float)x, (float)y);
+        }
+        return points;
+    }
+
+    private static void RunMapPolygonHoleProbe()
+    {
+        using Geometry outer = new(wkbGeometryType.wkbLinearRing);
+        outer.AddPoint_2D(4, 4);
+        outer.AddPoint_2D(60, 4);
+        outer.AddPoint_2D(60, 60);
+        outer.AddPoint_2D(4, 60);
+        outer.AddPoint_2D(4, 4);
+        using Geometry inner = new(wkbGeometryType.wkbLinearRing);
+        inner.AddPoint_2D(20, 20);
+        inner.AddPoint_2D(44, 20);
+        inner.AddPoint_2D(44, 44);
+        inner.AddPoint_2D(20, 44);
+        inner.AddPoint_2D(20, 20);
+        using Geometry polygon = new(wkbGeometryType.wkbPolygon);
+        polygon.AddGeometry(outer);
+        polygon.AddGeometry(inner);
+        List<OsmPrimitive> primitives = [];
+        int sequence = 0;
+        CollectOsmGeometry(
+            polygon, FillStyle(181, 208, 208, 60), "probe/water", ref sequence, primitives);
+        if (primitives.Count != 1 || primitives[0].InnerRings.Length != 1 || !primitives[0].IsPolygon)
+            throw new InvalidOperationException("map polygon hole was flattened during OSM collection");
+
+        using Bitmap bitmap = new(64, 64, PixelFormat.Format24bppRgb);
+        using Graphics graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.White);
+        using GraphicsPath path = new(FillMode.Alternate);
+        path.AddPolygon(primitives[0].Points.Select(point =>
+            new PointF((float)point.Longitude, (float)point.Latitude)).ToArray());
+        foreach (OsmPoint[] ring in primitives[0].InnerRings)
+        {
+            path.AddPolygon(ring.Select(point =>
+                new PointF((float)point.Longitude, (float)point.Latitude)).ToArray());
+        }
+        using SolidBrush brush = new(Color.FromArgb(181, 208, 208));
+        graphics.FillPath(brush, path);
+        if (bitmap.GetPixel(10, 10).ToArgb() != brush.Color.ToArgb() ||
+            bitmap.GetPixel(32, 32).ToArgb() != Color.White.ToArgb())
+            throw new InvalidOperationException("map polygon renderer filled an inner island ring");
     }
 
     // Direct port of TSRE AceLib::save: uncompressed planar RGB, no legacy tool.

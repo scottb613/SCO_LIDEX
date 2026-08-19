@@ -43,6 +43,9 @@ Overwrite:
 
 5. Options
 ----------
+Create Route Tiles, Create DM Tiles, and Create OSM/Map Tiles are selected by
+default. Every Options control has a short tooltip describing its behavior.
+
 Create Route Tiles:
   Builds or updates normal 8m terrain tiles.
 
@@ -55,9 +58,23 @@ Create DM Tiles:
   style used by SCO LIDEX. If detected during Run, they are purged and rebuilt
   as TSRE-style lo_tiles.
 
-Create Map Tiles:
-  Creates one 4096x4096 OpenStreetMap texture for each selected normal terrain
-  tile. Map tiles do not apply to Distant Mountain terrain.
+Create OSM/Map Tiles:
+  Creates one 2048x2048 OpenStreetMap texture for each selected normal terrain
+  tile. Map tiles do not apply to Distant Mountain terrain. Enable HD Map Tiles
+  creates 4096x4096 textures instead.
+
+Enable HD Mesh Tiles:
+  Unlocks HD Test - 4m Tiles under Terrain Output. With this option off,
+  Terrain Output remains locked to Normal - 8m Tiles.
+
+Enable HD Map Tiles:
+  Creates 4096x4096 map PNGs instead of the default 2048x2048 size.
+
+Scan behavior:
+  Scan is read-only. When Create Route Tiles is selected, it reports mixed 8m
+  and 4m terrain and records approved conversion for Run. When Create Route
+  Tiles is off, terrain resolution is not inspected because route terrain is
+  outside the selected work.
 
   Scan selects the smallest Geofabrik regional extract that covers the route,
   reports its current download size/date, verifies the bundled OSM/PBF driver,
@@ -84,19 +101,28 @@ Create Map Tiles:
   route-local PBF. Existing caches are accepted as the user's chosen data;
   purge a PBF before running when a fresh download is wanted.
 
+  On the first run for a PBF and terrain footprint, LIDEX streams the regional
+  file once and writes osm_data\route-osm-working.gpkg plus its manifest. This
+  internal, spatially indexed route cut contains complete geometry clipped to
+  the buffered union of normal terrain tiles. Map and PolyVeg processing use
+  the compact cut. It is rebuilt automatically when the PBF stamp or terrain
+  footprint changes.
+
   Route OSM derivative output:
 
-  During Create Map Tiles, SCO LIDEX also creates or updates these files under
+  During Create OSM/Map Tiles, SCO LIDEX also creates or updates these files under
   the active route:
 
   <Route>\osm_data\route-geodata.gpkg
   <Route>\osm_data\route-geodata.json
-  <Route>\osm_data\forest-polygons.geojson
+  <Route>\osm_data\polyveg-polygons.geojson
+  <Route>\osm_data\polyveg-exclusions.geojson
 
   route-geodata.gpkg is a WGS84 GeoPackage with spatial indexes. It contains
   separate source-geometry layers for woodland, scrub, heath, grassland,
-  wetland, water polygons, waterways, buildings, developed land, agriculture,
-  roads, railways, and bare ground. Original road, railway, and waterway lines
+  wetland, agriculture, orchard, parkland, golf course, cemetery, sports, zoo,
+  water polygons, waterways, buildings, developed land, roads, railways, and
+  bare ground. Original road, railway, and waterway lines
   remain lines; their clearance widths are not permanently applied to these
   source layers.
 
@@ -105,11 +131,36 @@ Create Map Tiles:
   2048-meter context margin, coordinate system, feature count per layer, and
   geometry repair/skip diagnostics.
 
-  forest-polygons.geojson is the schemaVersion 1 TSRE compatibility product.
-  It contains woodland clipped to exact route world-tile coverage after the
-  current road, railway, water, building, developed-land, agriculture, and
-  bare-ground exclusion masks are applied. Polygon, multipolygon, and inner
-  ring geometry is retained with original, plantable, and excluded area values.
+  polyveg-polygons.geojson is the schemaVersion 2 final TSRE planting product.
+  It contains woodland, scrub, heath, wetland, grassland, agriculture, orchard,
+  parkland, golf course, cemetery, sports, and zoo features, clipped to exact
+  route coverage. Every feature retains its exact OSM key=value styleId, F3 RGB
+  fill, stable sourceId, drawOrder, and useful OSM tags. LIDEX applies its
+  deterministic map drawing order from top to bottom and subtracts every
+  already-visible surface, so no two final features overlap. It also subtracts
+  buildings, developed land, roads, railways, trails, open water, buffered
+  waterways, and bare ground. Each feature retains stable sourceId, category,
+  drawOrder, useful OSM tags, holes, and multipolygon pieces.
+
+  OSM `natural=tree_row` ways are converted into separate 10 m-wide woodland
+  polygons. They use the common dark-green forest color and drawOrder 30, so
+  they remain visible and plantable above ordinary woodland and agricultural
+  polygons. They participate in woodland-category planting while retaining
+  their own stable way sourceId. Normal developed-land, road, path, railway,
+  water, building, and bare-ground exclusions still apply.
+
+  Visible-layer processing is partitioned into bounded terrain sections with
+  a one-foot overlap halo. The halo preserves exclusions and drawing-order
+  ownership across section edges; pieces are recombined under their original
+  stable sourceId before validation and export.
+
+  polyveg-exclusions.geojson is the schemaVersion 2 WGS84 companion product
+  used by TSRE GenX Ruler (polyveg) override placement. Every feature has an ID,
+  Polygon or MultiPolygon geometry, and properties.kind. Road, track, trail, and
+  waterway lines carry their placement-clearance buffer; protected water,
+  building, developed/urban, and bare-ground polygons retain their
+  exclusion footprint. All features are clipped to exact route world-tile
+  coverage while retaining geometry that crosses the coverage boundary.
 
   Exact coverage is the union of the route's actual 2048-meter world-tile
   footprints. Habitat and planting layers are clipped to exact coverage.
@@ -117,13 +168,14 @@ Create Map Tiles:
   2048-meter margin around that coverage.
 
   A covering PBF may remain in another route's cache and is read directly from
-  that location. The three derivative files are always saved under the active
+  that location. The four derivative files are always saved under the active
   route. SCO LIDEX rebuilds them when the source PBF identity or route
-  world-tile fingerprint changes. A newly downloaded PBF always triggers a
+  normal terrain-tile fingerprint changes. Terrain without an object-bearing
+  .w file remains in PolyVeg coverage. A newly downloaded PBF always triggers a
   rebuild. If the source and route coverage are unchanged, the current
   derivatives are reused.
 
-  All three new files are written and validated as temporary outputs before
+  All four files are written and validated as temporary outputs before
   they atomically replace the previous derivative set. A failed or aborted
   rebuild leaves the previous validated set in place.
 
@@ -137,8 +189,9 @@ Create Map Tiles:
   On exit, SCO LIDEX lists every known purgeable OSM data cache separately:
   regional PBFs and incomplete downloads. Every purge checkbox is clear by
   default. The small shared Geofabrik index is internal application data and is
-  never offered for deletion. route-geodata.gpkg, route-geodata.json, and
-  forest-polygons.geojson are route output and are never offered for deletion.
+  never offered for deletion. route-geodata.gpkg, route-geodata.json,
+  polyveg-polygons.geojson, and polyveg-exclusions.geojson are route output and
+  are never offered for deletion.
   Select only the OSM caches to remove, then choose Purge Selected; Keep All
   leaves every cache untouched, and Cancel Exit returns to the application.
 
@@ -161,9 +214,10 @@ Create Map Tiles:
   or change an overlay already loaded by a running TSRE process; reopen or
   reload the route when testing replaced cache images.
 
-  Map output uses compressed 4096x4096 PNG files in the route terrain_maps cache.
-  Processing loads selected-route geometry once and retains it while two 4096
-  bitmaps are rendered concurrently. Large routes still require substantial
+  Map output uses compressed 2048x2048 PNG files by default or 4096x4096 PNGs
+  when Enable HD Map Tiles is selected. Processing loads selected-route geometry
+  once and retains it while two map bitmaps are rendered concurrently. Large
+  routes still require substantial
   time, memory, and disk space.
 
   Every OSM vertex is projected into the exact tile-local meter frame used by
@@ -222,19 +276,31 @@ Help:
 
 6. Terrain Output
 -----------------
-Normal - 8m:
+Normal - 8m Tiles:
   Creates the standard Open Rails normal-terrain format using a 256x256 height
   grid with 8m post spacing. This is the supported output for normal route use.
 
-Testing - 4 m:
-  The packaged GUI control remains visible but disabled. Normal - 8 m stays
-  selected, and GUI Scan and Run use the supported 8m output.
+HD Test - 4m Tiles:
+  Creates the Open Rails test format using a 512x512 height grid with 4m post
+  spacing. Each completed grid enters a bounded virtual seam mesh and updates
+  the live counter. Completed rows are edge/corner merged, written, and released
+  continuously; the complete route mesh is never retained in memory. Distant
+  Mountain generation uses the same bounded rolling-row rule.
 
-  The isolated test mechanism remains in source: 512x512 _y.raw writing, 4m
-  metadata, selected-footprint generation, shared edge/corner merging,
-  all-or-nothing terrain preparation, and optional DM/maps. It remains an
-  evaluation path for coordinated Open Rails format testing, not a selectable
-  packaged-GUI output.
+Scan checks the resolution of every terrain tile on the route, regardless of
+the selected coverage source or Run options. A route may never contain mixed
+8m and 4m terrain. If mismatched tiles are found, a styled warning asks for
+approval. Approval does not modify the route during Scan. At Run, every
+mismatched tile is forced into the selected output and rebuilt from current
+elevation data even when it was outside the original selection. Terrain tile
+coordinates, textures, world files, and route coverage are preserved.
+
+Advanced Geo Bias Commit/Post Processing reads and writes the selected 256x256
+or 512x512 format and uses its matching 8m or 4m post spacing.
+
+Terrain generation also repairs obsolete map images embedded as the normal
+terrain material. Legacy `_map.ace` references are reset to `terrain.ace` while
+the separate TSRE F3 `terrain_maps` PNG overlay remains available.
 
 7. Selection
 ------------
@@ -275,6 +341,12 @@ DM Radius:
 
 Global elevation fallback:
   For normal terrain, SCO LIDEX tries USGS 1m, 5m~, and 10m sources first.
+  A valid empty USGS product list confirms that the requested source has no
+  coverage for that tile, so the next lower-resolution source may be used.
+  A timeout, malformed response, missing product list, or failed product read
+  is treated as a temporary source hiccup instead. LIDEX tries cached products
+  first; if they cannot complete that source tier, the tile is left
+  ungenerated, marked for Append retry, and included in the failed-tile list.
   Posts still lacking
   coverage are read anonymously from Copernicus DEM GLO-30 Public on AWS Open
   Data and are counted as 30m (global). This is low-resolution source data even
@@ -392,7 +464,7 @@ OPERATION COMPLETE outcome, failures, errors, aborts, and READY remain fixed.
 Interface sounds follow the same production states:
 - SCOpress plays for application button presses.
 - SCOtic plays for checkbox and radio-button selections.
-- SCOprogress plays for ordinary message-panel stage changes.
+- SCOpluck plays for ordinary message-panel stage changes.
 - SCOsuccess plays when Scan or Run completes successfully.
 - SCObuzz plays for failure, error, or abort indications.
 
@@ -416,6 +488,9 @@ SCOLIDEX-startup-error.txt file on the user's Desktop.
 If normal terrain tiles fail during Run, SCO LIDEX marks retryable failed tiles
 so Append can try them again later. This is usually the easiest recovery path,
 especially for temporary USGS service or internet failures.
+Temporary source failures are counted as failed, not generated or skipped, and
+lower-resolution data is not accepted in place of a source that merely had a
+hiccup. Both Normal - 8m Tiles and HD Test - 4m Tiles print the retry list.
 
 For most retryable failures:
   1. Wait a while if the log suggests USGS/service trouble.

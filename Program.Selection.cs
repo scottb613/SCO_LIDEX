@@ -24,7 +24,10 @@ namespace ORterr;
 
 internal static partial class Program
 {
-    private static void EnsureMarkerCoverageTiles(string routeDir, int terrainRadius)
+    private static void EnsureMarkerCoverageTiles(
+        string routeDir,
+        int terrainRadius,
+        bool hd4mOutput)
     {
         if (string.IsNullOrWhiteSpace(routeDir) || !Directory.Exists(routeDir))
         {
@@ -46,10 +49,13 @@ internal static partial class Program
         }
 
         HashSet<TileCoordinate> coverage = BuildMarkerNormalTileCoverage(markers, terrainRadius);
-        EnsureNormalCoverageTiles(routeDir, coverage, $"Marker coverage: {markers.Count:N0} markers, radius {Math.Max(0, terrainRadius):N0}");
+        EnsureNormalCoverageTiles(routeDir, coverage, $"Marker coverage: {markers.Count:N0} markers, radius {Math.Max(0, terrainRadius):N0}", hd4mOutput);
     }
 
-    private static void EnsureTrackDatabaseCoverageTiles(string routeDir, int terrainRadius)
+    private static void EnsureTrackDatabaseCoverageTiles(
+        string routeDir,
+        int terrainRadius,
+        bool hd4mOutput)
     {
         HashSet<TileCoordinate> trackTiles = ReadTrackDatabaseTileCoordinates(routeDir);
         if (trackTiles.Count == 0)
@@ -58,10 +64,13 @@ internal static partial class Program
         }
 
         HashSet<TileCoordinate> coverage = ExpandNormalTileCoverage(trackTiles, terrainRadius);
-        EnsureNormalCoverageTiles(routeDir, coverage, $"Track database coverage: {trackTiles.Count:N0} track tile(s), radius {Math.Max(0, terrainRadius):N0}");
+        EnsureNormalCoverageTiles(routeDir, coverage, $"Track database coverage: {trackTiles.Count:N0} track tile(s), radius {Math.Max(0, terrainRadius):N0}", hd4mOutput);
     }
 
-    private static void EnsureKmlCoverageTiles(string routeDir, int terrainRadius)
+    private static void EnsureKmlCoverageTiles(
+        string routeDir,
+        int terrainRadius,
+        bool hd4mOutput)
     {
         HashSet<TileCoordinate> kmlTiles = ReadKmlTileCoordinates(routeDir);
         if (kmlTiles.Count == 0)
@@ -70,10 +79,12 @@ internal static partial class Program
         }
 
         HashSet<TileCoordinate> coverage = ExpandNormalTileCoverage(kmlTiles, terrainRadius);
-        EnsureNormalCoverageTiles(routeDir, coverage, $"KML coverage: {kmlTiles.Count:N0} tile(s), radius {Math.Max(0, terrainRadius):N0}");
+        EnsureNormalCoverageTiles(routeDir, coverage, $"KML coverage: {kmlTiles.Count:N0} tile(s), radius {Math.Max(0, terrainRadius):N0}", hd4mOutput);
     }
 
-    private static void EnsureTextFileCoverageTiles(string routeDir)
+    private static void EnsureTextFileCoverageTiles(
+        string routeDir,
+        bool hd4mOutput)
     {
         HashSet<TileCoordinate> textTiles = ReadTextFileTileCoordinates(routeDir);
         if (textTiles.Count == 0)
@@ -81,10 +92,14 @@ internal static partial class Program
             throw new InvalidOperationException("SCOLIDEXTiles.txt did not contain any readable terrain tile names.");
         }
 
-        EnsureNormalCoverageTiles(routeDir, textTiles, $"Text file coverage: {textTiles.Count:N0} exact tile(s)");
+        EnsureNormalCoverageTiles(routeDir, textTiles, $"Text file coverage: {textTiles.Count:N0} exact tile(s)", hd4mOutput);
     }
 
-    private static void EnsureNormalCoverageTiles(string routeDir, HashSet<TileCoordinate> coverage, string description)
+    private static void EnsureNormalCoverageTiles(
+        string routeDir,
+        HashSet<TileCoordinate> coverage,
+        string description,
+        bool hd4mOutput)
     {
         FileInfo templateTile = FindTerrainTileTemplate(routeDir)
             ?? throw new FileNotFoundException("could not find a terrain .t template in generated-tiles or the route tiles folder");
@@ -108,13 +123,23 @@ internal static partial class Program
             EnsureExactFileNameCasing(rawPath);
             if (!File.Exists(tilePath))
             {
-                File.WriteAllBytes(tilePath, CreateTerrainTileFromTemplate(templateTile, tileBaseName));
+                byte[] tileBytes = CreateTerrainTileFromTemplate(templateTile, tileBaseName);
+                PatchTerrainResolutionMetadata(
+                    tileBytes,
+                    hd4mOutput ? ExperimentalRawGridSize : OrtsRawGridSize,
+                    hd4mOutput
+                        ? (float)ExperimentalPostSpacingMeters
+                        : (float)OrtsPostSpacingMeters);
+                File.WriteAllBytes(tilePath, tileBytes);
                 createdTerrainTiles++;
             }
 
             if (!File.Exists(rawPath))
             {
-                File.WriteAllBytes(rawPath, CreateEmptyRawGridBytes());
+                File.WriteAllBytes(
+                    rawPath,
+                    CreateEmptyRawGridBytes(
+                        hd4mOutput ? ExperimentalRawGridSize : OrtsRawGridSize));
                 createdRawGrids++;
             }
 
@@ -533,16 +558,12 @@ internal static partial class Program
 
     private static byte[] CreateEmptyRawGridBytes()
     {
-        byte[] bytes = new byte[OrtsRawGridSize * OrtsRawGridSize * sizeof(short)];
-        for (int i = 0; i < bytes.Length; i += sizeof(short))
-        {
-            BitConverter.TryWriteBytes(bytes.AsSpan(i, sizeof(short)), RawMissingHeight);
-        }
-
-        return bytes;
+        return CreateEmptyRawGridBytes(OrtsRawGridSize);
     }
 
-    private static void MarkTerrainTileForAppendRetry(TerrainTile tile)
+    private static void MarkTerrainTileForAppendRetry(
+        TerrainTile tile,
+        int gridSize = OrtsRawGridSize)
     {
         string rawPath = tile.RawHeightPath
             ?? Path.Combine(
@@ -558,7 +579,7 @@ internal static partial class Program
         {
             Directory.CreateDirectory(Path.GetDirectoryName(rawPath) ?? ".");
             EnsureExactFileNameCasing(rawPath);
-            File.WriteAllBytes(rawPath, CreateEmptyRawGridBytes());
+            File.WriteAllBytes(rawPath, CreateEmptyRawGridBytes(gridSize));
             Console.WriteLine("  -> Marked tile raw grid as missing so a later Append will retry it.");
         }
         catch (Exception ex)

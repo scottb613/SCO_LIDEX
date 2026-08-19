@@ -1,9 +1,9 @@
 SCO LIDEX Known Issues
 ======================
 
-- Testing - 4 m remains disabled in the packaged GUI and Normal - 8 m stays
-  selected. The evaluation mechanism remains in source for coordinated Open
-  Rails format testing.
+- HD Test - 4m Tiles is an Open Rails evaluation output. Back up the route
+  before converting it. When Create Route Tiles is selected, read-only Scan
+  requires approval before Run rebuilds mismatched tiles into that resolution.
 
 - USGS services may occasionally time out or fail for specific areas. Retry
   later or use the failed-tile list with Use Text File + Append.
