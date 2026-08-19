@@ -1157,6 +1157,12 @@ internal sealed partial class TopoForm : Form
         out string logEntry)
     {
         logEntry = "";
+        if (!createRouteTiles.Checked)
+        {
+            terrainResolutionForceApproved = false;
+            return true;
+        }
+
         Program.TerrainOutputResolution selectedResolution =
             experimentalOutput.Checked
                 ? Program.TerrainOutputResolution.HdTest4m
