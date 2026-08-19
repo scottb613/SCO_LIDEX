@@ -492,8 +492,8 @@ internal sealed partial class TopoForm : Form
             "Unlock 4m mesh output; otherwise terrain stays at 8m.");
         optionToolTip.SetToolTip(enableHdMapTiles,
             "Create 4096 x 4096 map tiles instead of 2048 x 2048.");
-        optionPanel.Controls.Add(enableHd4mTiles, 1, 2);
-        optionPanel.Controls.Add(enableHdMapTiles, 1, 3);
+        optionPanel.Controls.Add(enableHdMapTiles, 1, 2);
+        optionPanel.Controls.Add(enableHd4mTiles, 1, 3);
         createRouteTiles.Margin = new Padding(3, 0, 3, 3);
         cleanTileTemplate.Margin = new Padding(3, 0, 3, 3);
         distantMountains.Margin = new Padding(3, 3, 3, 3);
