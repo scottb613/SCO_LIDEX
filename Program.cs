@@ -1038,7 +1038,7 @@ internal static partial class Program
             bool createsSelectionCoverage = options.MarkerCoverage || options.TrackDatabaseCoverage || options.KmlCoverage || options.TextFileCoverage;
             string existingQualifier = createsSelectionCoverage ? " currently existing" : "";
             Console.WriteLine($"\nRoute tile scan: {processingTiles.Count:N0}{existingQualifier} selected tile(s).");
-            if (createsSelectionCoverage)
+            if (createsSelectionCoverage && options.CreateRouteTiles)
             {
                 Console.WriteLine("Route tile plan: Run will create and index any missing selected base terrain tiles.");
             }
@@ -1067,6 +1067,11 @@ internal static partial class Program
                 if (tile.WorldTile is null)
                 {
                     invalidTiles.Add($"{baseName} (cannot retrieve world position)");
+                }
+
+                if (!options.CreateRouteTiles)
+                {
+                    continue;
                 }
 
                 if (tile.RawHeightPath is null || !File.Exists(tile.RawHeightPath))
@@ -1111,7 +1116,9 @@ internal static partial class Program
             }
             else
             {
-                Console.WriteLine($"Route tile scan: all selected tiles are named, decoded, positioned, and readable as {TerrainOutputLabel(requestedResolution)}.");
+                Console.WriteLine(options.CreateRouteTiles
+                    ? $"Route tile scan: all selected tiles are named, decoded, positioned, and readable as {TerrainOutputLabel(requestedResolution)}."
+                    : "Map tile scan: all selected terrain tiles are named, decoded, and geographically positioned.");
             }
 
             if (options.CreateMapTiles)

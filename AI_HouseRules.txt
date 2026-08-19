@@ -183,6 +183,19 @@ Distributable Rules
 - Publish only the single approved ZIP as the GitHub release asset unless the
   user explicitly requests additional assets.
 
+TST Deployment
+==============
+
+- The established local TST runtime is
+  `dist\SCOLIDEX\SCOLIDEX-win-x64`.
+- "Push to TST" or "Copy to TST" means create a clean self-contained win-x64
+  publish and atomically replace that complete runtime directory.
+- A TST deployment does not update the release ZIP, Git branches, commits,
+  tags, GitHub release assets, release notes, or public documentation unless
+  the user explicitly requests those additional actions.
+- If the TST executable is running or files are locked, ask the user to close
+  the application before retrying the deployment.
+
 Push Local
 ==========
 
