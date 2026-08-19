@@ -275,7 +275,7 @@ internal sealed partial class TopoForm : Form
         kmlCoverage.CheckedChanged += (_, _) => UpdateRadiusState();
         trackDatabaseCoverage.CheckedChanged += (_, _) => UpdateRadiusState();
         textFileCoverage.CheckedChanged += (_, _) => UpdateRadiusState();
-        distantMountains.CheckedChanged += (_, _) => loTileRadius.Enabled = distantMountains.Checked;
+        distantMountains.CheckedChanged += (_, _) => UpdateRadiusState();
         enableHd4mTiles.CheckedChanged += (_, _) =>
         {
             if (!enableHd4mTiles.Checked)
@@ -568,6 +568,10 @@ internal sealed partial class TopoForm : Form
         coverage.Controls.Add(terrainRadius, 1, 6);
         coverage.Controls.Add(new Label { AutoSize = true, Text = "DM Radius:" }, 0, 7);
         coverage.Controls.Add(loTileRadius, 1, 7);
+        optionToolTip.SetToolTip(terrainRadius,
+            "Expands selected coverage by this many tiles in every direction. Suggested: 2.");
+        optionToolTip.SetToolTip(loTileRadius,
+            "Expands Distant Mountain coverage by this many DM tiles in every direction. Suggested: 1.");
 
         coverageBox.Controls.Add(coverage);
         Control outputPanel = BuildOutputPanel();
@@ -1946,7 +1950,7 @@ internal sealed partial class TopoForm : Form
         textFileCoverage.Enabled = !locked;
         terrainRadius.Enabled = !locked && UsesTileRadius();
         distantMountains.Enabled = !locked;
-        loTileRadius.Enabled = !locked && distantMountains.Checked;
+        loTileRadius.Enabled = !locked && distantMountains.Checked && UsesTileRadius();
         normalOutput.Enabled = !locked && enableHd4mTiles.Checked;
         experimentalOutput.Enabled = !locked && enableHd4mTiles.Checked;
         postEastWestShiftSlider.Enabled = !locked;
@@ -2055,7 +2059,10 @@ internal sealed partial class TopoForm : Form
 
     private void UpdateRadiusState()
     {
-        terrainRadius.Enabled = runCancellation is null && scanCancellation is null && !scanLocked && UsesTileRadius();
+        bool interactive = runCancellation is null && scanCancellation is null && !scanLocked;
+        bool usesRadius = UsesTileRadius();
+        terrainRadius.Enabled = interactive && usesRadius;
+        loTileRadius.Enabled = interactive && distantMountains.Checked && usesRadius;
     }
 
     private void WireScanInvalidation()
