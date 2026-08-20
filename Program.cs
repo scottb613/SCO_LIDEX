@@ -209,6 +209,12 @@ internal static partial class Program
             return;
         }
 
+        if (args.Contains("--dem-fallback-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunDemFallbackProbe();
+            return;
+        }
+
         await RunConsoleAsync(args, CancellationToken.None);
     }
 

@@ -24,6 +24,15 @@ namespace ORterr;
 
 internal static partial class Program
 {
+    // Public DEM products occasionally contain finite, undeclared sentinel
+    // values. Reject them before interpolation so the normal source fallback
+    // path can replace the affected posts instead of encoding terrain walls.
+    private const double MinimumPlausibleDemElevationMeters = -1000.0;
+    private const double MaximumPlausibleDemElevationMeters = 10000.0;
+    private const double MaximumPlausibleDemCellDeltaMeters = 1500.0;
+    private const string AllSamplesNoDataFailure = "all sampled pixels were nodata";
+    private const string WindowOutsideRasterFailure = "window outside raster";
+
     private static void PrintRouteSummary(
         RouteLayout route,
         TerrainOutputResolution terrainResolution)
@@ -375,11 +384,27 @@ internal static partial class Program
                     continue;
                 }
 
+                if (IsDemCoverageGapFailure(failure))
+                {
+                    Console.WriteLine(
+                        $"  -> {GetDemSourceDisplayName(datasetName)} has no usable samples " +
+                        $"in this part of {productName}; lower-resolution fallback remains available.");
+                    continue;
+                }
+
                 failures.Add(Path.GetFileName(new Uri(url).LocalPath) + ": " + failure);
             }
         }
 
         return windows;
+    }
+
+    private static bool IsDemCoverageGapFailure(string failure)
+    {
+        return string.Equals(
+                failure, AllSamplesNoDataFailure, StringComparison.Ordinal) ||
+            failure.StartsWith(
+                WindowOutsideRasterFailure, StringComparison.Ordinal);
     }
 
     private static List<string> FilterDemProductUrls(string datasetName, IReadOnlyList<string> urls)
@@ -607,11 +632,30 @@ internal static partial class Program
         addDataBytes((long)width * height * sizeof(float));
 
         double? noData = TryGetNoDataValue(elevationBand);
+        RasterElevationTransform elevationTransform =
+            GetRasterElevationTransform(ds, elevationBand);
+        if (Math.Abs(elevationTransform.UnitToMeters - 1.0) > 0.0000001)
+        {
+            Console.WriteLine(
+                $"  -> DEM vertical units: {elevationTransform.UnitName}; " +
+                $"converting source elevations to metres.");
+        }
+
         for (int y = 0; y < gridHeight; y++)
         {
             for (int x = 0; x < gridWidth; x++)
             {
-                if (!TryBilinearSample(samples, width, height, xMin, yMin, rasterXs[y, x], rasterYs[y, x], noData, out double sample))
+                if (!TryBilinearSample(
+                        samples,
+                        width,
+                        height,
+                        xMin,
+                        yMin,
+                        rasterXs[y, x],
+                        rasterYs[y, x],
+                        noData,
+                        elevationTransform,
+                        out double sample))
                 {
                     heights[y, x] = RawMissingHeight;
                     missing++;
@@ -627,8 +671,89 @@ internal static partial class Program
             FillMissingHeights(heights);
         }
 
-        failure = missing >= gridWidth * gridHeight ? "all sampled pixels were nodata" : "";
+        failure = missing >= gridWidth * gridHeight ? AllSamplesNoDataFailure : "";
         return missing < gridWidth * gridHeight;
+    }
+
+    private static RasterElevationTransform GetRasterElevationTransform(
+        Dataset ds,
+        Band elevationBand)
+    {
+        elevationBand.GetScale(out double bandScale, out int hasScale);
+        elevationBand.GetOffset(out double bandOffset, out int hasOffset);
+        bandScale = hasScale == 0 ? 1.0 : bandScale;
+        bandOffset = hasOffset == 0 ? 0.0 : bandOffset;
+
+        string unitName = elevationBand.GetUnitType()?.Trim() ?? "";
+        double unitToMeters = TryGetUnitScaleToMeters(unitName, out double bandUnitScale)
+            ? bandUnitScale
+            : 1.0;
+
+        // USGS OPR products commonly omit the raster-band unit while retaining
+        // their original projected CRS. In that case the elevation samples use
+        // the CRS linear unit too (for example Tennessee State Plane ftUS).
+        if (string.IsNullOrWhiteSpace(unitName))
+        {
+            string projection = ds.GetProjection();
+            if (!string.IsNullOrWhiteSpace(projection))
+            {
+                using SpatialReference spatialReference = new("");
+                spatialReference.ImportFromWkt(ref projection);
+                if (spatialReference.IsProjected() == 1)
+                {
+                    double crsUnitToMeters = spatialReference.GetLinearUnits();
+                    string crsUnitName = spatialReference.GetLinearUnitsName();
+                    if (double.IsFinite(crsUnitToMeters) &&
+                        crsUnitToMeters > 0)
+                    {
+                        unitName = crsUnitName;
+                        unitToMeters = crsUnitToMeters;
+                    }
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(unitName))
+        {
+            unitName = "metres (assumed)";
+        }
+
+        return new RasterElevationTransform(
+            bandScale * unitToMeters,
+            bandOffset * unitToMeters,
+            unitToMeters,
+            unitName);
+    }
+
+    private static bool TryGetUnitScaleToMeters(
+        string unitName,
+        out double unitToMeters)
+    {
+        string normalized = unitName.Trim().ToLowerInvariant();
+        if (normalized is "m" or "meter" or "meters" or "metre" or "metres")
+        {
+            unitToMeters = 1.0;
+            return true;
+        }
+
+        if (normalized.Contains("survey foot", StringComparison.Ordinal) ||
+            normalized.Contains("foot_us", StringComparison.Ordinal) ||
+            normalized.Contains("ftus", StringComparison.Ordinal) ||
+            normalized.Contains("us-ft", StringComparison.Ordinal))
+        {
+            unitToMeters = 1200.0 / 3937.0;
+            return true;
+        }
+
+        if (normalized is "ft" or "foot" or "feet" ||
+            normalized.Contains("international foot", StringComparison.Ordinal))
+        {
+            unitToMeters = 0.3048;
+            return true;
+        }
+
+        unitToMeters = 1.0;
+        return false;
     }
 
     private static short[,] CreateMissingHeightGrid()
@@ -687,6 +812,7 @@ internal static partial class Program
         double rasterX,
         double rasterY,
         double? noData,
+        RasterElevationTransform elevationTransform,
         out double value)
     {
         value = 0;
@@ -702,11 +828,33 @@ internal static partial class Program
             return false;
         }
 
-        float q00 = samples[(y0 * width) + x0];
-        float q10 = samples[(y0 * width) + x1];
-        float q01 = samples[(y1 * width) + x0];
-        float q11 = samples[(y1 * width) + x1];
-        if (!IsValidSample(q00, noData) || !IsValidSample(q10, noData) || !IsValidSample(q01, noData) || !IsValidSample(q11, noData))
+        if (!TryConvertElevationSample(
+                samples[(y0 * width) + x0],
+                noData,
+                elevationTransform,
+                out double q00) ||
+            !TryConvertElevationSample(
+                samples[(y0 * width) + x1],
+                noData,
+                elevationTransform,
+                out double q10) ||
+            !TryConvertElevationSample(
+                samples[(y1 * width) + x0],
+                noData,
+                elevationTransform,
+                out double q01) ||
+            !TryConvertElevationSample(
+                samples[(y1 * width) + x1],
+                noData,
+                elevationTransform,
+                out double q11))
+        {
+            return false;
+        }
+
+        double minimum = Math.Min(Math.Min(q00, q10), Math.Min(q01, q11));
+        double maximum = Math.Max(Math.Max(q00, q10), Math.Max(q01, q11));
+        if (maximum - minimum > MaximumPlausibleDemCellDeltaMeters)
         {
             return false;
         }
@@ -719,9 +867,25 @@ internal static partial class Program
         return true;
     }
 
-    private static bool IsValidSample(float sample, double? noData)
+    private static bool TryConvertElevationSample(
+        float sample,
+        double? noData,
+        RasterElevationTransform elevationTransform,
+        out double valueMeters)
     {
-        return !float.IsNaN(sample) && (noData is null || Math.Abs(sample - noData.Value) >= 0.001);
+        valueMeters = 0;
+        if (!float.IsFinite(sample) ||
+            (noData is not null && Math.Abs(sample - noData.Value) < 0.001))
+        {
+            return false;
+        }
+
+        valueMeters =
+            (sample * elevationTransform.ValueScale) +
+            elevationTransform.ValueOffset;
+        return double.IsFinite(valueMeters) &&
+            valueMeters >= MinimumPlausibleDemElevationMeters &&
+            valueMeters <= MaximumPlausibleDemElevationMeters;
     }
 
     private static (double X, double Y) TransformLonLatToDataset(Dataset ds, double lon, double lat)
@@ -1777,6 +1941,12 @@ internal static partial class Program
     private sealed class RetryableDemSourceException(string message) : InvalidOperationException(message);
 
     private sealed record TerrainSampleEncoding(float Floor, float Scale);
+
+    private sealed record RasterElevationTransform(
+        double ValueScale,
+        double ValueOffset,
+        double UnitToMeters,
+        string UnitName);
 
     private sealed record PatchCornerRef(float[,] Grid, int X, int Y);
 
