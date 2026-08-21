@@ -195,8 +195,8 @@ Scan behavior:
   Select only the OSM caches to remove, then choose Purge Selected; Keep All
   leaves every cache untouched, and Cancel Exit returns to the application.
 
-  Purge Selected remains available when nothing is checked. In that case it
-  plays the failure buzz, deletes nothing, and keeps the exit dialog open.
+  Purge Selected remains inactive until at least one cache is checked. It then
+  receives the normal amber available-action outline and can be selected.
 
   Generated terrain_maps PNG files are route output, not purgeable OSM cache.
   SCO LIDEX never offers those images for deletion and never removes the
@@ -232,10 +232,6 @@ Scan behavior:
   TSRE's red center, secondary highways orange, tertiary highways yellow, and
   motorway/trunk roads orange-red. The thin bright-red marker line shown by
   TSRE is an editor/KML overlay and is not part of the map texture.
-
-Create Mosaic Tiles:
-  Disabled teaser for future development. It performs no Scan or Run work in
-  this build.
 
 Clean Tile Wipe (Destructive):
   Rebuilds terrain .t files from a clean template. This can repair corrupted
@@ -273,6 +269,29 @@ Help:
   Opens this instruction file inside SCO LIDEX as a formatted, read-only
   document. Text can be selected and copied, but the instructions cannot be
   accidentally edited from the Help window.
+
+Interface Layout:
+  SCO LIDEX uses a TSRE-inspired dark operator-console layout. The fixed left
+  sidebar contains the LIDEX masthead, Mode, Selection, Build Options, version,
+  Contact, and Help. It is centered and requires no scrollbars at the supported
+  minimum window size.
+
+  Build Options are arranged as follows: Route Tiles is paired with HD Mesh
+  Tiles; DM Tiles occupies the next left-column row; and OSM / Map Tiles is
+  paired with HD Map Tiles. Scan Override and Clean Tile Wipe follow below.
+
+  The right workspace contains Route Path, live Status, Advanced Geo Bias,
+  workflow commands, and the framed Running Log. The log receives the flexible
+  area when the window is resized and retains its vertical scrollbar. The
+  window is not maximizable, and startup bounds are kept inside the active
+  monitor's usable area.
+
+  A thin amber outline means an action is available. The stronger amber outline
+  marks the next workflow step: Scan at startup, then Run after a successful
+  scan. Completing or resetting a run returns the emphasis to Scan.
+
+  Controls, disabled choices, confirmation windows, and the cache-on-exit window
+  use the same charcoal and amber theme for consistent readability.
 
 6. Terrain Output
 -----------------
@@ -329,7 +348,7 @@ Use Track Database:
 8. Radius
 ---------
 Tile Radius:
-  Applies to Marker, KML, and Track Database selections.
+  Defaults to 2 and applies to Marker, KML, and Track Database selections.
   Radius 0 means only the source tile.
   Radius 1 means a 3x3 block around each source tile.
   Radius 2 means a 5x5 block around each source tile.
@@ -347,6 +366,13 @@ Global elevation fallback:
   is treated as a temporary source hiccup instead. LIDEX tries cached products
   first; if they cannot complete that source tier, the tile is left
   ungenerated, marked for Append retry, and included in the failed-tile list.
+
+  Raster band scale/offset and vertical units are normalized to metres before
+  interpolation, including US survey-foot and international-foot products.
+  Declared NoData, invalid finite sentinels, implausible elevations, and extreme
+  local discontinuities remain missing so the next valid source can fill them;
+  they are never encoded as terrain spikes or walls.
+
   Posts still lacking
   coverage are read anonymously from Copernicus DEM GLO-30 Public on AWS Open
   Data and are counted as 30m (global). This is low-resolution source data even
@@ -445,7 +471,7 @@ Run logs also include separate human-readable USGS and Copernicus data-read
 totals. These are practical estimates based on service responses plus the DEM
 raster windows SCO LIDEX asks GDAL to read.
 
-The message panel between Exit and Contact reports the active production stage:
+The centered message panel above the running log reports the active production stage:
 - SCAN COMPLETE
 - TILES - US - HIGH RES
 - TILES - GLOBAL - LOW RES

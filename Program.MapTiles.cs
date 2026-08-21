@@ -23,6 +23,7 @@ internal static partial class Program
 {
     private static int MapImageSize = 2048;
     private const int MapTileParallelism = 2;
+    private const double TreeRowWidthMetres = 10.0;
     private const string GeofabrikIndexUrl = "https://download.geofabrik.de/index-v1.json";
     // Relation-safe route cut written during the first regional PBF scan. Maps
     // and PolyVeg reuse this compact, spatially indexed source until either the
@@ -148,7 +149,7 @@ internal static partial class Program
             return new MapSourceAvailability(
                 resolution.CanRun,
                 resolution.CacheOnly,
-                !resolution.RemoteIndexAvailable || !resolution.RemoteExtractAvailable,
+                HasMapSourceWarning(resolution),
                 resolution.Detail);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or IOException or InvalidOperationException)
@@ -156,6 +157,47 @@ internal static partial class Program
             Console.WriteLine($"Map source: FAILED ({ex.Message}).");
             return new MapSourceAvailability(false, false, true, ex.Message);
         }
+    }
+
+    private static bool HasMapSourceWarning(GeofabrikResolution resolution)
+    {
+        return !resolution.RemoteIndexAvailable ||
+            (!resolution.CachedExtractAvailable && !resolution.RemoteExtractAvailable);
+    }
+
+    internal static void RunMapSourceWarningProbe()
+    {
+        GeofabrikRegion region = new(
+            "probe",
+            "Probe Region",
+            "https://example.invalid/probe.osm.pbf",
+            1,
+            null,
+            -1,
+            -1,
+            1,
+            1);
+
+        GeofabrikResolution healthyCache = new(
+            region, true, false, true, "probe.osm.pbf", "validated cache");
+        GeofabrikResolution offlineCache = new(
+            region, false, false, true, "probe.osm.pbf", "cached fallback");
+        GeofabrikResolution healthyRemote = new(
+            region, true, true, false, null, "remote available");
+        GeofabrikResolution unavailable = new(
+            region, true, false, false, null, "unavailable");
+
+        if (HasMapSourceWarning(healthyCache) ||
+            !HasMapSourceWarning(offlineCache) ||
+            HasMapSourceWarning(healthyRemote) ||
+            !HasMapSourceWarning(unavailable))
+        {
+            throw new InvalidOperationException("map-source warning classification probe failed");
+        }
+
+        Console.WriteLine("Map source warning probe: PASSED");
+        Console.WriteLine("  validated cache with healthy index is a clean pass");
+        Console.WriteLine("  cached-index fallback and unavailable sources remain warnings");
     }
 
     private static void ValidateMapProjectionAlignment(GeoTileMapper mapper, WorldTile tile)
@@ -333,7 +375,7 @@ internal static partial class Program
     private static HttpClient CreateMapHttpClient(TimeSpan timeout)
     {
         HttpClient client = new() { Timeout = timeout };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.300 (Open Rails terrain builder)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.400 (Open Rails terrain builder)");
         return client;
     }
 
@@ -1618,7 +1660,7 @@ internal static partial class Program
         string railway = GetOgrField(feature, "railway");
         string waterway = GetOgrField(feature, "waterway");
         string landuse = GetOgrField(feature, "landuse");
-        string natural = GetOgrField(feature, "natural");
+        string natural = GetOgrTag(feature, "natural").Trim().ToLowerInvariant();
         string building = GetOgrField(feature, "building");
         string leisure = GetOgrField(feature, "leisure");
         string amenity = GetOgrField(feature, "amenity");
@@ -1632,7 +1674,11 @@ internal static partial class Program
         // their water polygons instead of being obscured by adjacent land use.
         if (!string.IsNullOrEmpty(building)) return FillStyle(190, 173, 173, TsreDrawOrder(1), 169, 148, 165);
         if (!string.IsNullOrEmpty(shop)) return FillStyle(200, 170, 170, TsreDrawOrder(1), 169, 148, 165);
-        if (natural == "tree_row") return LineStyle(133, 193, 133, 8, TsreDrawOrder(6));
+        if (natural == "tree_row")
+        {
+            float widthPixels = (float)(TreeRowWidthMetres * MapImageSize / OrtsTileSizeMeters);
+            return LineStyle(133, 193, 133, widthPixels, TsreDrawOrder(6));
+        }
         PolyVegClassification? polyVeg = GetPolyVegClassification(feature);
         if (polyVeg is not null)
             return FillStyle(polyVeg.FillRed, polyVeg.FillGreen, polyVeg.FillBlue, polyVeg.DrawOrder);
@@ -1738,6 +1784,49 @@ internal static partial class Program
     {
         int index = feature.GetFieldIndex(name);
         return index >= 0 && feature.IsFieldSetAndNotNull(index) ? feature.GetFieldAsString(index) ?? "" : "";
+    }
+
+    private static string GetOgrTag(Feature feature, string name)
+    {
+        string direct = GetOgrField(feature, name);
+        if (!string.IsNullOrWhiteSpace(direct))
+        {
+            return direct;
+        }
+
+        string otherTags = GetOgrField(feature, "other_tags");
+        if (string.IsNullOrEmpty(otherTags))
+        {
+            return "";
+        }
+
+        string marker = $"\"{name}\"=>\"";
+        int start = otherTags.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+        {
+            return "";
+        }
+
+        start += marker.Length;
+        StringBuilder value = new();
+        for (int index = start; index < otherTags.Length; index++)
+        {
+            char character = otherTags[index];
+            if (character == '\\' && index + 1 < otherTags.Length)
+            {
+                value.Append(otherTags[++index]);
+                continue;
+            }
+
+            if (character == '"')
+            {
+                return value.ToString();
+            }
+
+            value.Append(character);
+        }
+
+        return "";
     }
 
     private static int DrawOsmPrimitive(Graphics graphics, GeoTileMapper mapper, WorldTile tile, OsmPrimitive primitive)

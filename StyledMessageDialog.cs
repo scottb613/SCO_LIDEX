@@ -2,20 +2,26 @@
 // Copyright (C) Scott Brunner, Beast of Burden
 // SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
 
+using System;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace ORterr;
 
 internal sealed class StyledMessageDialog : Form
 {
-    private static readonly Color AppBackColor = Color.FromArgb(242, 241, 238);
-    private static readonly Color PanelBackColor = Color.FromArgb(248, 247, 244);
-    private static readonly Color TextColor = Color.FromArgb(28, 29, 30);
-    private static readonly Color AccentColor = Color.FromArgb(126, 77, 48);
-    private static readonly Color AccentGreen = Color.FromArgb(69, 118, 73);
-    private static readonly Color ButtonBackColor = Color.FromArgb(232, 229, 224);
-    private static readonly Color PrimaryButtonBackColor = Color.FromArgb(216, 232, 216);
+    private const int DwmUseImmersiveDarkMode = 20;
+    private static readonly Color AppBackColor = Color.FromArgb(45, 45, 45);
+    private static readonly Color PanelBackColor = Color.FromArgb(34, 34, 34);
+    private static readonly Color TextColor = Color.FromArgb(240, 240, 240);
+    private static readonly Color AccentColor = Color.FromArgb(226, 178, 126);
+    private static readonly Color AccentGreen = Color.FromArgb(205, 132, 52);
+    private static readonly Color ButtonBackColor = Color.FromArgb(48, 48, 48);
+    private static readonly Color PrimaryButtonBackColor = Color.FromArgb(58, 58, 58);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr windowHandle, int attribute, ref int value, int valueSize);
 
     private StyledMessageDialog(
         IWin32Window? owner,
@@ -159,6 +165,22 @@ internal sealed class StyledMessageDialog : Form
         root.Controls.Add(buttonPanel, 0, 1);
     }
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        try
+        {
+            int enabled = 1;
+            _ = DwmSetWindowAttribute(Handle, DwmUseImmersiveDarkMode, ref enabled, sizeof(int));
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
+    }
+
     internal static DialogResult Show(
         IWin32Window? owner,
         string message,
@@ -169,6 +191,7 @@ internal sealed class StyledMessageDialog : Form
         using StyledMessageDialog dialog = new(owner, message, caption, buttons, icon);
         return owner is null ? dialog.ShowDialog() : dialog.ShowDialog(owner);
     }
+
 
     internal static DialogResult Show(
         string message,
@@ -222,7 +245,7 @@ internal sealed class StyledMessageDialog : Form
         button.FlatAppearance.BorderSize = 1;
         button.FlatAppearance.BorderColor = primary
             ? AccentGreen
-            : Color.FromArgb(150, 145, 137);
+            : Color.FromArgb(92, 92, 92);
         button.MouseDown += (_, _) => UiSounds.PlayPress();
         button.KeyDown += (_, e) =>
         {
@@ -293,15 +316,15 @@ internal sealed class StyledMessageDialog : Form
     {
         if (icon == MessageBoxIcon.Error)
         {
-            return ("×", Color.FromArgb(166, 58, 44), Color.FromArgb(244, 219, 214), "Error");
+            return ("×", Color.FromArgb(235, 126, 108), Color.FromArgb(64, 38, 35), "Error");
         }
         if (icon == MessageBoxIcon.Warning)
         {
-            return ("!", Color.FromArgb(154, 104, 35), Color.FromArgb(247, 231, 196), "Warning");
+            return ("!", Color.FromArgb(235, 170, 81), Color.FromArgb(68, 51, 32), "Warning");
         }
         if (icon == MessageBoxIcon.Question)
         {
-            return ("?", AccentColor, Color.FromArgb(239, 227, 217), "Question");
+            return ("?", AccentColor, Color.FromArgb(67, 48, 36), "Question");
         }
         return ("i", AccentGreen, PrimaryButtonBackColor, "Information");
     }

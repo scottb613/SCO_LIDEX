@@ -25,6 +25,14 @@ internal static partial class Program
                 "DEM fallback probe failed US survey foot conversion.");
         }
 
+        if (!TryGetUnitScaleToMeters(
+                "international foot", out double internationalFootToMeters) ||
+            Math.Abs(internationalFootToMeters - 0.3048) > 1e-12)
+        {
+            throw new InvalidOperationException(
+                "DEM fallback probe failed international foot conversion.");
+        }
+
         RasterElevationTransform feetTransform = new(
             usSurveyFootToMeters,
             0,
@@ -64,6 +72,40 @@ internal static partial class Program
         {
             throw new InvalidOperationException(
                 "DEM fallback probe accepted a NoData interpolation cell.");
+        }
+
+        float[] finiteSentinelCell = [528, 999999, 528, 528];
+        if (TryBilinearSample(
+                finiteSentinelCell,
+                width: 2,
+                height: 2,
+                xOrigin: 0,
+                yOrigin: 0,
+                rasterX: 0.5,
+                rasterY: 0.5,
+                noData: null,
+                metreTransform,
+                out _))
+        {
+            throw new InvalidOperationException(
+                "DEM fallback probe accepted an undeclared finite sentinel.");
+        }
+
+        float[] discontinuousCell = [528, 2529, 528, 528];
+        if (TryBilinearSample(
+                discontinuousCell,
+                width: 2,
+                height: 2,
+                xOrigin: 0,
+                yOrigin: 0,
+                rasterX: 0.5,
+                rasterY: 0.5,
+                noData: null,
+                metreTransform,
+                out _))
+        {
+            throw new InvalidOperationException(
+                "DEM fallback probe accepted an implausible local discontinuity.");
         }
 
         Console.WriteLine("DEM fallback probe passed.");

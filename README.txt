@@ -10,10 +10,32 @@ and writes terrain back into an existing route.
 The exact planting handoff is documented in
 docsMaster\POLYVEG-GEODATA-CONTRACT-v2.txt.
 
-Current version: v1.300.
+Current version: v1.400.
 
 Release highlights
 ==================
+
+v1.400 - What's New
+-------------------
+
+- Restructures the application as a professional TSRE-inspired dark operator
+  console for small screens. The fixed centered sidebar contains Mode,
+  Selection, Build Options, version, Contact, and Help; the Running Log receives
+  the flexible workspace.
+- Supports the complete interface at the 1024x700 minimum without sidebar
+  scrollbars. Maximizing is disabled and startup remains inside the active
+  monitor's usable area.
+- Applies the charcoal/amber theme to controls, disabled choices, numeric
+  inputs, sliders, Help, Contact, confirmations, and cache cleanup. Thin amber
+  marks available actions; strong amber leads from Scan to Run and marks Keep
+  All as the preferred exit choice.
+- Corrects the DEM data issue identified on the ETRY Kentucky route. Raster
+  scale/offset and metre or foot-based vertical units are normalized before
+  interpolation. NoData, invalid finite sentinels, implausible elevations, and
+  extreme cell discontinuities use the established lower-resolution fallback
+  instead of producing terrain spikes.
+- Defaults Tile Radius to 2, removes the unstable Text Size and unused Mosaic
+  Tiles controls, and compacts the terrain/map options into two columns.
 
 v1.300 - What's New
 -------------------
@@ -200,7 +222,7 @@ v1.100 - Additional work
 Installation
 ============
 
-1. Download SCOLIDEX-v1.300-win-x64.zip from the GitHub release.
+1. Download SCOLIDEX-v1.400-win-x64.zip from the GitHub release.
 2. Extract the complete archive to a writable folder.
 3. Run SCOLIDEX-win-x64\SCOLIDEX.exe.
 4. Optionally run AddShortcutDesktop.cmd from the extracted top-level folder.

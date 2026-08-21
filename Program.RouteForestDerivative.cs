@@ -41,7 +41,7 @@ internal static partial class Program
                 {
                     type = "FeatureCollection",
                     schemaVersion = 2,
-                    generatorRevision = 3,
+                    generatorRevision = 4,
                     source = new
                     {
                         pbfPath = pbf.FullName,
@@ -108,13 +108,12 @@ internal static partial class Program
     private sealed class RoutePolyVegGeodataBuilder : IDisposable
     {
         private const int SchemaVersion = 2;
-        private const int GeneratorRevision = 3;
+        private const int GeneratorRevision = 4;
         private const double CoverageBufferMetres = 2048.0;
         private const double GeometryAreaToleranceSquareMetres = 0.01;
         private const double OverlayPrecisionMetres = 0.01;
         private const double TerrainVegetationSeparationMetres = 0.3048;
         private const double TerrainOverlayPrecisionMetres = 0.10;
-        private const double TreeRowWidthMetres = 10.0;
 
         private static readonly HashSet<string> ExcludedLanduse = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -1724,7 +1723,7 @@ internal static partial class Program
                 AddLine("way/6", "highway", "path", -0.15);
                 AddLine("way/7", "railway", "rail", 0.15);
                 AddLine("way/8", "waterway", "stream", 0.45);
-                AddLine("way/9", "natural", "tree_row", 0.65);
+                AddLine("way/9", "other_tags", "\"natural\"=>\"tree_row\"", 0.65);
             }
         }
 
@@ -2049,10 +2048,10 @@ internal static partial class Program
 
         private static string RawField(Feature feature, string name)
         {
-            int index = feature.GetFieldIndex(name);
-            return index < 0 || !feature.IsFieldSetAndNotNull(index)
-                ? ""
-                : (feature.GetFieldAsString(index) ?? "").Trim();
+            string value = string.Equals(name, "natural", StringComparison.OrdinalIgnoreCase)
+                ? GetOgrTag(feature, name)
+                : GetOgrField(feature, name);
+            return value.Trim();
         }
 
         private static string NormalizedField(Feature feature, string name) =>

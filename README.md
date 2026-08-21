@@ -4,9 +4,17 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 
 The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v2.txt](docsMaster/POLYVEG-GEODATA-CONTRACT-v2.txt).
 
-> **Current version:** v1.300.
+> **Current version:** v1.400.
 
 ## Release Highlights
+
+### v1.400 — What's New
+
+- Restructures the application as a professional TSRE-inspired dark operator console for small screens. A fixed, centered sidebar carries Mode, Selection, Build Options, version, Contact, and Help while the Running Log receives the flexible workspace.
+- Supports the complete interface at the 1024×700 minimum without sidebar scrollbars. Maximizing is disabled, startup stays inside the active monitor, and the log retains its useful vertical viewing area.
+- Applies the charcoal/amber theme consistently to controls, disabled choices, numeric inputs, sliders, Help, Contact, confirmations, and cache cleanup. Thin amber marks available actions; strong amber leads from Scan to Run and marks Keep All as the preferred exit choice.
+- Corrects the DEM data issue identified on the ETRY Kentucky route. Raster scale/offset and metre or foot-based vertical units are normalized before interpolation; NoData, invalid finite sentinels, implausible elevations, and extreme cell discontinuities fall through to the established lower-resolution source path instead of producing terrain spikes.
+- Defaults Tile Radius to 2, removes the unstable Text Size and unused Mosaic Tiles controls, and arranges Route Tiles, DM Tiles, OSM/Map Tiles, HD Mesh Tiles, and HD Map Tiles in a compact two-column workflow.
 
 ### v1.300 — What's New
 
@@ -114,7 +122,7 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 
 ## Installation
 
-1. Download `SCOLIDEX-v1.300-win-x64.zip` from the [v1.300 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.300).
+1. Download `SCOLIDEX-v1.400-win-x64.zip` from the [v1.400 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.400).
 2. Extract the complete archive to a writable folder.
 3. Run `SCOLIDEX-win-x64\SCOLIDEX.exe`.
 4. Optionally run `AddShortcutDesktop.cmd` from the extracted top-level folder.

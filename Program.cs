@@ -215,6 +215,12 @@ internal static partial class Program
             return;
         }
 
+        if (args.Contains("--map-source-warning-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunMapSourceWarningProbe();
+            return;
+        }
+
         await RunConsoleAsync(args, CancellationToken.None);
     }
 

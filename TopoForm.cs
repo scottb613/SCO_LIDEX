@@ -6,10 +6,12 @@
 // SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Text;
@@ -22,20 +24,21 @@ namespace ORterr;
 
 internal sealed partial class TopoForm : Form
 {
-    private static readonly Color AppBackColor = Color.FromArgb(242, 241, 238);
-    private static readonly Color HeaderBackColor = Color.FromArgb(232, 229, 224);
-    private static readonly Color PanelBackColor = Color.FromArgb(248, 247, 244);
-    private static readonly Color TextColor = Color.FromArgb(28, 29, 30);
-    private static readonly Color HelpTextColor = Color.FromArgb(35, 35, 35);
-    private static readonly Color MutedTextColor = Color.FromArgb(88, 88, 84);
-    private static readonly Color AccentColor = Color.FromArgb(126, 77, 48);
-    private static readonly Color AccentGreen = Color.FromArgb(69, 118, 73);
-    private static readonly Color WarningColor = Color.FromArgb(154, 104, 35);
-    private static readonly Color DangerColor = Color.FromArgb(166, 58, 44);
-    private static readonly Color ButtonBackColor = Color.FromArgb(232, 229, 224);
-    private static readonly Color PrimaryButtonBackColor = Color.FromArgb(216, 232, 216);
-    private static readonly Color LogBackColor = Color.FromArgb(35, 35, 35);
-    private static readonly Color LogTextColor = Color.FromArgb(226, 226, 218);
+    private static readonly Color AppBackColor = Color.FromArgb(45, 45, 45);
+    private static readonly Color HeaderBackColor = Color.FromArgb(38, 38, 38);
+    private static readonly Color PanelBackColor = Color.FromArgb(34, 34, 34);
+    private static readonly Color InputBackColor = Color.FromArgb(27, 27, 27);
+    private static readonly Color TextColor = Color.FromArgb(240, 240, 240);
+    private static readonly Color HelpTextColor = Color.FromArgb(205, 205, 205);
+    private static readonly Color MutedTextColor = Color.FromArgb(184, 184, 184);
+    private static readonly Color AccentColor = Color.FromArgb(226, 178, 126);
+    private static readonly Color AccentGreen = Color.FromArgb(205, 132, 52);
+    private static readonly Color WarningColor = Color.FromArgb(235, 170, 81);
+    private static readonly Color DangerColor = Color.FromArgb(214, 92, 75);
+    private static readonly Color ButtonBackColor = Color.FromArgb(52, 52, 52);
+    private static readonly Color PrimaryButtonBackColor = Color.FromArgb(58, 58, 58);
+    private static readonly Color LogBackColor = Color.FromArgb(24, 24, 24);
+    private static readonly Color LogTextColor = Color.FromArgb(202, 202, 202);
 
     private static readonly string SettingsDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -43,42 +46,48 @@ internal sealed partial class TopoForm : Form
     private static readonly string LastRoutePathFile = Path.Combine(SettingsDirectory, "last-route.txt");
     private static readonly string RouteHistoryFile = Path.Combine(SettingsDirectory, "route-history.json");
     private const int MaximumRouteHistoryEntries = 5;
+    private const int DwmUseImmersiveDarkMode = 20;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr windowHandle, int attribute, ref int value, int valueSize);
+
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr windowHandle, string? subAppName, string? subIdList);
 
     private readonly TextBox routePathText = new();
     private readonly Button routeHistoryButton = new();
     private readonly Button browseRouteButton = new();
     private readonly ContextMenuStrip routeHistoryMenu = new();
-    private readonly RadioButton appendMode = new();
-    private readonly RadioButton overwriteMode = new();
-    private readonly CheckBox createRouteTiles = new();
-    private readonly CheckBox distantMountains = new();
-    private readonly CheckBox createMapTiles = new();
-    private readonly CheckBox createMosaicTiles = new();
-    private readonly CheckBox cleanTileTemplate = new();
-    private readonly CheckBox scanOverride = new();
-    private readonly CheckBox enableHd4mTiles = new();
-    private readonly CheckBox enableHdMapTiles = new();
+    private readonly RadioButton appendMode = new DarkRadioButton();
+    private readonly RadioButton overwriteMode = new DarkRadioButton();
+    private readonly CheckBox createRouteTiles = new DarkCheckBox();
+    private readonly CheckBox distantMountains = new DarkCheckBox();
+    private readonly CheckBox createMapTiles = new DarkCheckBox();
+    private readonly CheckBox cleanTileTemplate = new DarkCheckBox();
+    private readonly CheckBox scanOverride = new DarkCheckBox();
+    private readonly CheckBox enableHd4mTiles = new DarkCheckBox();
+    private readonly CheckBox enableHdMapTiles = new DarkCheckBox();
     private readonly ToolTip optionToolTip = new();
-    private readonly RadioButton normalOutput = new();
-    private readonly RadioButton experimentalOutput = new();
-    private readonly RadioButton existingTilesCoverage = new();
-    private readonly RadioButton markerCoverage = new();
-    private readonly RadioButton kmlCoverage = new();
-    private readonly RadioButton trackDatabaseCoverage = new();
-    private readonly RadioButton textFileCoverage = new();
-    private readonly NumericUpDown terrainRadius = new();
-    private readonly NumericUpDown loTileRadius = new();
-    private readonly TrackBar postEastWestShiftSlider = new();
-    private readonly TrackBar postNorthSouthShiftSlider = new();
-    private readonly NumericUpDown postEastWestShiftValue = new();
-    private readonly NumericUpDown postNorthSouthShiftValue = new();
+    private readonly RadioButton normalOutput = new DarkRadioButton();
+    private readonly RadioButton experimentalOutput = new DarkRadioButton();
+    private readonly RadioButton existingTilesCoverage = new DarkRadioButton();
+    private readonly RadioButton markerCoverage = new DarkRadioButton();
+    private readonly RadioButton kmlCoverage = new DarkRadioButton();
+    private readonly RadioButton trackDatabaseCoverage = new DarkRadioButton();
+    private readonly RadioButton textFileCoverage = new DarkRadioButton();
+    private readonly DarkNumericInput terrainRadius = new();
+    private readonly DarkNumericInput loTileRadius = new();
+    private readonly DarkTrackBar postEastWestShiftSlider = new();
+    private readonly DarkTrackBar postNorthSouthShiftSlider = new();
+    private readonly DarkNumericInput postEastWestShiftValue = new();
+    private readonly DarkNumericInput postNorthSouthShiftValue = new();
     private readonly Button commitPostProcessButton = new();
     private readonly Button scanButton = new();
     private readonly Button runButton = new();
     private readonly Button abortButton = new();
     private readonly Button exitButton = new();
-    private readonly Button contactButton = new();
-    private readonly Button helpButton = new();
+    private readonly Button contactButton = new NoFocusEmphasisButton();
+    private readonly Button helpButton = new NoFocusEmphasisButton();
     private readonly Label tileTotalValue = new();
     private readonly Label tileProcessedValue = new();
     private readonly Label tileSkippedValue = new();
@@ -102,6 +111,7 @@ internal sealed partial class TopoForm : Form
     private readonly StatusCounters routeStatus = new();
     private readonly StatusCounters dmStatus = new();
     private readonly Label versionLabel = new();
+    private TableLayoutPanel? appShell;
     private bool readingDistantMountainOutput;
     private int activeDmIndex;
     private CancellationTokenSource? runCancellation;
@@ -120,122 +130,89 @@ internal sealed partial class TopoForm : Form
     private bool operationMessageAnimated;
     private int activityBulletCount;
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        try
+        {
+            int enabled = 1;
+            _ = DwmSetWindowAttribute(Handle, DwmUseImmersiveDarkMode, ref enabled, sizeof(int));
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
+    }
     public TopoForm()
     {
         Text = "SCO LIDEX";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(960, 1024);
-        Size = new Size(980, 1124);
+        MinimumSize = new Size(960, 700);
+        Size = new Size(1180, 900);
+        MaximizeBox = false;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Font = new Font("Segoe UI", 9f, FontStyle.Regular);
         DoubleBuffered = true;
         ResizeRedraw = true;
         BackColor = AppBackColor;
         ForeColor = TextColor;
 
+        Panel frame = new()
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(4),
+            BackColor = AppBackColor,
+        };
+        frame.Paint += PaintApplicationFrame;
+        Controls.Add(frame);
+
+        appShell = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = AppBackColor,
+        };
+        appShell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ScaleLayoutPixels(320)));
+        appShell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        appShell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        frame.Controls.Add(appShell);
+        appShell.Controls.Add(BuildBrandRail(), 0, 0);
+
         TableLayoutPanel root = new()
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 6,
-            Padding = new Padding(12),
+            RowCount = 5,
+            Padding = new Padding(10),
             BackColor = AppBackColor,
+            AutoScroll = false,
         };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        Controls.Add(root);
-
-        TableLayoutPanel titlePanel = new()
-        {
-            Dock = DockStyle.Top,
-            ColumnCount = 2,
-            RowCount = 2,
-            AutoSize = true,
-            BackColor = HeaderBackColor,
-            Padding = new Padding(12, 9, 12, 0),
-            Margin = new Padding(0, 0, 0, 8),
-        };
-        titlePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        titlePanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        titlePanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        titlePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 2));
-        titlePanel.Paint += (_, e) =>
-        {
-            Rectangle surface = titlePanel.ClientRectangle;
-            if (surface.Width <= 1 || surface.Height <= 1)
-            {
-                return;
-            }
-
-            using LinearGradientBrush plate = new(
-                surface,
-                Color.FromArgb(238, 235, 230),
-                Color.FromArgb(224, 220, 214),
-                LinearGradientMode.Vertical);
-            e.Graphics.FillRectangle(plate, surface);
-
-            using Pen brushedLine = new(Color.FromArgb(9, 91, 76, 66));
-            for (int y = 7; y < surface.Height - 3; y += 8)
-            {
-                e.Graphics.DrawLine(brushedLine, 2, y, surface.Width - 3, y);
-            }
-
-            using Pen copperEdge = new(Color.FromArgb(150, 93, 58));
-            using Pen graphiteEdge = new(Color.FromArgb(91, 84, 77));
-            e.Graphics.DrawRectangle(copperEdge, 0, 0, surface.Width - 1, surface.Height - 1);
-            e.Graphics.DrawRectangle(graphiteEdge, 1, 1, surface.Width - 3, surface.Height - 3);
-        };
-
-        PictureBox titleImage = new()
-        {
-            Size = new Size(428, 108),
-            Anchor = AnchorStyles.Left,
-            BackColor = Color.Transparent,
-            Margin = new Padding(5, 0, 0, 0),
-            SizeMode = PictureBoxSizeMode.Zoom,
-            Image = LoadTitleImage(),
-        };
-        titleImage.Visible = titleImage.Image is not null;
-
-        versionLabel.AutoSize = true;
-        versionLabel.Anchor = AnchorStyles.Right | AnchorStyles.Top;
-        versionLabel.BackColor = PanelBackColor;
-        versionLabel.BorderStyle = BorderStyle.FixedSingle;
-        versionLabel.Font = new Font("Segoe UI", 9, FontStyle.Regular);
-        versionLabel.ForeColor = MutedTextColor;
-        versionLabel.Padding = new Padding(8, 3, 8, 3);
-        versionLabel.Margin = new Padding(22, 9, 0, 0);
-        versionLabel.Text = LoadVersionText();
-
-        Panel divider = new()
-        {
-            Dock = DockStyle.Fill,
-            Height = 1,
-            BackColor = Color.FromArgb(188, 172, 158),
-            Margin = new Padding(0, 8, 0, 0),
-        };
-        titlePanel.Controls.Add(titleImage, 0, 0);
-        titlePanel.Controls.Add(versionLabel, 1, 0);
-        titlePanel.Controls.Add(divider, 0, 1);
-        titlePanel.SetColumnSpan(divider, 2);
-        root.Controls.Add(titlePanel);
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        appShell.Controls.Add(root, 1, 0);
 
         root.Controls.Add(BuildRoutePanel());
-        root.Controls.Add(BuildOptionsPanel());
-        root.Controls.Add(BuildButtonPanel());
-
+        root.Controls.Add(BuildOperationalPanel());
         logText.Dock = DockStyle.Fill;
         logText.Multiline = true;
         logText.ReadOnly = true;
         logText.ScrollBars = ScrollBars.Vertical;
-        logText.Font = new Font("Consolas", 9);
+        logText.Font = new Font("Consolas", 9f);
         logText.BackColor = LogBackColor;
         logText.ForeColor = LogTextColor;
         logText.BorderStyle = BorderStyle.FixedSingle;
-        logText.MinimumSize = new Size(0, 150);
-        root.Controls.Add(logText);
+        logText.MinimumSize = new Size(0, ScaleLayoutPixels(180));
+        GroupBox logBox = new DarkGroupBox() { Text = "Running Log", Dock = DockStyle.Fill, Margin = new Padding(0) };
+        StyleGroupBox(logBox);
+        logBox.Controls.Add(logText);
+        root.Controls.Add(logBox);
+        root.Controls.Add(BuildButtonPanel());
 
         TableLayoutPanel footer = new()
         {
@@ -253,7 +230,7 @@ internal sealed partial class TopoForm : Form
         {
             AutoSize = true,
             Anchor = AnchorStyles.Left,
-            Font = new Font("Segoe UI", 10, FontStyle.Regular),
+            Font = new Font("Segoe UI", 10f, FontStyle.Regular),
             ForeColor = AccentColor,
             Text = "License: GNU GPL v3.0 or later",
             Margin = new Padding(0),
@@ -262,7 +239,7 @@ internal sealed partial class TopoForm : Form
         {
             AutoSize = true,
             Anchor = AnchorStyles.Right,
-            Font = new Font("Segoe UI", 10, FontStyle.Regular),
+            Font = new Font("Segoe UI", 10f, FontStyle.Regular),
             ForeColor = AccentColor,
             Text = "USGS + Copernicus Public Elevation Data",
             Margin = new Padding(0),
@@ -286,10 +263,6 @@ internal sealed partial class TopoForm : Form
         };
         experimentalOutput.CheckedChanged += (_, _) =>
         {
-            if (experimentalOutput.Checked)
-            {
-                overwriteMode.Checked = true;
-            }
             SetRunning(runCancellation is not null);
         };
         WireScanInvalidation();
@@ -304,12 +277,247 @@ internal sealed partial class TopoForm : Form
         ResetStatus();
         SetRunning(false);
         WireToggleSounds(this);
-        Shown += (_, _) => uiSoundsEnabled = true;
+        Load += (_, _) => FitWindowToWorkingArea();
+        Shown += (_, _) =>
+        {
+            ApplyDarkNativeTheme(this);
+            uiSoundsEnabled = true;
+        };
+    }
+
+    private int ScalePixels(int pixels)
+    {
+        return Math.Max(1, pixels);
+    }
+
+    private int ScaleLayoutPixels(int pixels)
+    {
+        return Math.Max(1, (int)Math.Round(pixels * DeviceDpi / 96f));
+    }
+
+    private static void ConfigureDarkDialog(Form dialog)
+    {
+        dialog.HandleCreated += (_, _) => ApplyDarkTitleBar(dialog);
+        dialog.Shown += (_, _) => ApplyDarkNativeTheme(dialog);
+    }
+
+    private static void ApplyDarkTitleBar(Form form)
+    {
+        try
+        {
+            int enabled = 1;
+            _ = DwmSetWindowAttribute(form.Handle, DwmUseImmersiveDarkMode, ref enabled, sizeof(int));
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
+    }
+    private static void ApplyDarkNativeTheme(Control root)
+    {
+        try
+        {
+            ApplyDarkNativeThemeCore(root);
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
+    }
+
+    private static void ApplyDarkNativeThemeCore(Control control)
+    {
+        control.CreateControl();
+        if (control is TextBoxBase or NumericUpDown or ListView)
+        {
+            _ = SetWindowTheme(control.Handle, "DarkMode_Explorer", null);
+        }
+
+        foreach (Control child in control.Controls)
+        {
+            ApplyDarkNativeThemeCore(child);
+        }
+    }
+    private void FitWindowToWorkingArea()
+    {
+        Rectangle workArea = Screen.FromControl(this).WorkingArea;
+        MinimumSize = new Size(Math.Min(960, workArea.Width), Math.Min(700, workArea.Height));
+        Size = new Size(Math.Min(1180, workArea.Width), Math.Min(900, workArea.Height));
+        Location = new Point(
+            workArea.Left + ((workArea.Width - Width) / 2),
+            workArea.Top + ((workArea.Height - Height) / 2));
     }
 
     // Build the top half of the form from small panels instead of the designer.
     // That keeps the layout reproducible in source and avoids hidden .resx or
     // designer state when sharing the project publicly.
+    private Control BuildBrandRail()
+    {
+        Panel rail = new()
+        {
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0),
+            Padding = new Padding(12),
+            BackColor = HeaderBackColor,
+        };
+        rail.Paint += PaintBrandRail;
+
+        TableLayoutPanel shell = new()
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            BackColor = Color.Transparent,
+        };
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleLayoutPixels(80)));
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        TableLayoutPanel identity = new()
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Margin = new Padding(0, 0, 0, 10),
+            Padding = new Padding(16, 6, 10, 6),
+            BackColor = PanelBackColor,
+        };
+        identity.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        identity.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ScaleLayoutPixels(58)));
+        identity.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleLayoutPixels(43)));
+        identity.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        identity.Paint += PaintBrandIdentity;
+
+        Label brandName = new()
+        {
+            Dock = DockStyle.Fill,
+            Text = "LIDEX",
+            Font = new Font("Segoe UI Semibold", 21f, FontStyle.Bold),
+            ForeColor = AccentColor,
+            BackColor = Color.Transparent,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0),
+        };
+        Label brandSubtitle = new()
+        {
+            Dock = DockStyle.Fill,
+            Text = "OPEN RAILS TERRAIN BUILDER",
+            Font = new Font("Segoe UI Semibold", 8f, FontStyle.Regular),
+            ForeColor = MutedTextColor,
+            BackColor = Color.Transparent,
+            TextAlign = ContentAlignment.TopLeft,
+            Margin = new Padding(1, 1, 0, 0),
+        };
+        MeshGlobeControl brandGlobe = new()
+        {
+            Dock = DockStyle.Fill,
+            Margin = new Padding(5, 2, 1, 2),
+        };
+        identity.Controls.Add(brandName, 0, 0);
+        identity.Controls.Add(brandSubtitle, 0, 1);
+        identity.Controls.Add(brandGlobe, 1, 0);
+        identity.SetRowSpan(brandGlobe, 2);
+        Control configuration = BuildOptionsPanel();
+
+        TableLayoutPanel utility = new()
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 2,
+            RowCount = 2,
+            Padding = new Padding(0, 9, 0, 0),
+            Margin = new Padding(0),
+            BackColor = Color.Transparent,
+        };
+        utility.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        utility.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        utility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        utility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        utility.Paint += PaintUtilityDivider;
+        versionLabel.AutoSize = true;
+        versionLabel.Anchor = AnchorStyles.None;
+        versionLabel.Font = new Font("Segoe UI", 9f, FontStyle.Regular);
+        versionLabel.ForeColor = MutedTextColor;
+        versionLabel.Margin = new Padding(0, 5, 0, 7);
+        versionLabel.Text = LoadVersionText();
+
+        contactButton.Text = "Contact";
+        contactButton.TabStop = false;
+        StyleButton(contactButton, accent: true);
+        contactButton.Dock = DockStyle.Fill;
+        contactButton.Margin = new Padding(0, 0, 4, 0);
+        contactButton.Click += Contact_Click;
+        helpButton.Text = "Help";
+        helpButton.TabStop = false;
+        StyleButton(helpButton, accent: true);
+        helpButton.Dock = DockStyle.Fill;
+        helpButton.Margin = new Padding(4, 0, 0, 0);
+        helpButton.Click += Help_Click;
+
+        utility.Controls.Add(versionLabel, 0, 0);
+        utility.SetColumnSpan(versionLabel, 2);
+        utility.Controls.Add(contactButton, 0, 1);
+        utility.Controls.Add(helpButton, 1, 1);
+        shell.Controls.Add(identity, 0, 0);
+        shell.Controls.Add(configuration, 0, 1);
+        shell.Controls.Add(utility, 0, 2);
+        rail.Controls.Add(shell);
+        return rail;
+    }
+
+    private static void PaintBrandIdentity(object? sender, PaintEventArgs e)
+    {
+        if (sender is not Control identity || identity.ClientSize.Width < 2)
+        {
+            return;
+        }
+
+        using Pen accent = new(AccentGreen, 5);
+        using Pen divider = new(Color.FromArgb(82, 82, 82));
+        e.Graphics.DrawLine(accent, 2, 5, 2, identity.ClientSize.Height - 6);
+        e.Graphics.DrawLine(divider, 0, identity.ClientSize.Height - 1, identity.ClientSize.Width, identity.ClientSize.Height - 1);
+    }
+
+    private static void PaintUtilityDivider(object? sender, PaintEventArgs e)
+    {
+        if (sender is not Control utility || utility.ClientSize.Width < 2)
+        {
+            return;
+        }
+
+        using Pen divider = new(Color.FromArgb(82, 82, 82));
+        e.Graphics.DrawLine(divider, 0, 0, utility.ClientSize.Width, 0);
+    }
+    private static void PaintApplicationFrame(object? sender, PaintEventArgs e)
+    {
+        if (sender is not Panel frame || frame.ClientSize.Width < 6 || frame.ClientSize.Height < 6)
+        {
+            return;
+        }
+
+        using Pen copper = new(AccentGreen);
+        using Pen graphite = new(Color.FromArgb(82, 82, 82));
+        e.Graphics.DrawRectangle(copper, 0, 0, frame.ClientSize.Width - 1, frame.ClientSize.Height - 1);
+        e.Graphics.DrawRectangle(graphite, 2, 2, frame.ClientSize.Width - 5, frame.ClientSize.Height - 5);
+    }
+
+    private static void PaintBrandRail(object? sender, PaintEventArgs e)
+    {
+        if (sender is not Panel rail)
+        {
+            return;
+        }
+
+        Rectangle surface = rail.ClientRectangle;
+        using SolidBrush plate = new(HeaderBackColor);
+        e.Graphics.FillRectangle(plate, surface);
+        using Pen edge = new(AccentGreen);
+        e.Graphics.DrawLine(edge, surface.Width - 1, 0, surface.Width - 1, surface.Height);
+    }
     private Control BuildRoutePanel()
     {
         TableLayoutPanel panel = new()
@@ -317,7 +525,7 @@ internal sealed partial class TopoForm : Form
             Dock = DockStyle.Top,
             ColumnCount = 4,
             AutoSize = true,
-            Padding = new Padding(0, 12, 0, 6),
+            Padding = new Padding(0, 2, 0, 6),
             BackColor = AppBackColor,
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -327,21 +535,23 @@ internal sealed partial class TopoForm : Form
 
         panel.Controls.Add(new Label { AutoSize = true, Text = "Route Path:", Anchor = AnchorStyles.Left, ForeColor = TextColor }, 0, 0);
         routePathText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-        routePathText.BackColor = Color.White;
+        routePathText.BackColor = InputBackColor;
         routePathText.ForeColor = TextColor;
         routePathText.BorderStyle = BorderStyle.FixedSingle;
+        routeHistoryMenu.BackColor = PanelBackColor;
+        routeHistoryMenu.ForeColor = TextColor;
         panel.Controls.Add(routePathText, 1, 0);
 
         routeHistoryButton.Text = "Recent ▼";
         routeHistoryButton.Anchor = AnchorStyles.Left;
         routeHistoryButton.Click += ShowRouteHistory_Click;
-        StyleButton(routeHistoryButton, primary: true);
+        StyleButton(routeHistoryButton, accent: true);
         panel.Controls.Add(routeHistoryButton, 2, 0);
 
         browseRouteButton.Text = "Browse...";
         browseRouteButton.Anchor = AnchorStyles.Left;
         browseRouteButton.Click += BrowseRoute_Click;
-        StyleButton(browseRouteButton);
+        StyleButton(browseRouteButton, accent: true);
         panel.Controls.Add(browseRouteButton, 3, 0);
         return panel;
     }
@@ -353,16 +563,22 @@ internal sealed partial class TopoForm : Form
         box.Padding = new Padding(8, 6, 8, 8);
     }
 
-    private static void StyleButton(Button button, bool primary = false)
+    private static void StyleNumericInput(DarkNumericInput input)
+    {
+        input.BackColor = InputBackColor;
+        input.ForeColor = TextColor;
+        input.Height = 23;
+    }
+    private void StyleButton(Button button, bool primary = false, bool accent = false)
     {
         button.AutoSize = false;
-        button.MinimumSize = new Size(78, 28);
-        button.Size = new Size(78, 28);
+        button.MinimumSize = new Size(ScalePixels(78), ScalePixels(28));
+        button.Size = button.MinimumSize;
         button.Margin = new Padding(4, 3, 4, 3);
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderSize = 1;
         button.UseVisualStyleBackColor = false;
-        button.Tag = primary;
+        button.Tag = primary ? ButtonEmphasis.Primary : accent ? ButtonEmphasis.Accent : ButtonEmphasis.Neutral;
         button.MouseDown += (_, _) => UiSounds.PlayPress();
         button.KeyDown += (_, e) =>
         {
@@ -377,7 +593,13 @@ internal sealed partial class TopoForm : Form
 
     private static void SetButtonPrimary(Button button, bool primary)
     {
-        button.Tag = primary;
+        button.Tag = primary ? ButtonEmphasis.Primary : ButtonEmphasis.Accent;
+        UpdateButtonVisual(button);
+    }
+
+    private static void SetButtonAccent(Button button)
+    {
+        button.Tag = ButtonEmphasis.Accent;
         UpdateButtonVisual(button);
     }
 
@@ -399,81 +621,106 @@ internal sealed partial class TopoForm : Form
 
     private static void UpdateButtonVisual(Button button)
     {
-        bool primary = button.Tag is bool value && value;
+        ButtonEmphasis emphasis = button.Tag is ButtonEmphasis value ? value : ButtonEmphasis.Neutral;
         if (button.Enabled)
         {
-            button.BackColor = primary ? PrimaryButtonBackColor : ButtonBackColor;
+            button.BackColor = emphasis == ButtonEmphasis.Primary ? PrimaryButtonBackColor : ButtonBackColor;
             button.ForeColor = TextColor;
-            button.FlatAppearance.BorderColor = primary ? AccentGreen : Color.FromArgb(150, 145, 137);
+            button.FlatAppearance.BorderSize = emphasis == ButtonEmphasis.Primary ? 2 : 1;
+            button.FlatAppearance.BorderColor = emphasis switch
+            {
+                ButtonEmphasis.Primary => AccentGreen,
+                ButtonEmphasis.Accent => Color.FromArgb(173, 111, 45),
+                _ => Color.FromArgb(92, 92, 92),
+            };
             return;
         }
 
-        button.BackColor = Color.FromArgb(220, 218, 213);
-        button.ForeColor = Color.FromArgb(155, 151, 143);
-        button.FlatAppearance.BorderColor = Color.FromArgb(198, 194, 187);
+        button.BackColor = Color.FromArgb(43, 43, 43);
+        button.ForeColor = Color.FromArgb(112, 112, 112);
+        button.FlatAppearance.BorderSize = 1;
+        button.FlatAppearance.BorderColor = Color.FromArgb(72, 72, 72);
     }
 
     private Control BuildOptionsPanel()
     {
         Panel panel = new()
         {
-            Dock = DockStyle.Top,
-            Height = 536,
-            MinimumSize = new Size(0, 536),
-            BackColor = AppBackColor,
+            Dock = DockStyle.Fill,
+            AutoScroll = false,
+            Padding = new Padding(8, 4, 8, 4),
+            BackColor = Color.Transparent,
         };
-
-        GroupBox modeBox = new() { Text = "Mode" };
+        GroupBox modeBox = new DarkGroupBox() { Text = "Mode + Terrain Output" };
         StyleGroupBox(modeBox);
-        FlowLayoutPanel modeFlow = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, AutoSize = false, BackColor = PanelBackColor, ForeColor = TextColor };
+        TableLayoutPanel modeAndOutput = new()
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Padding = new Padding(6, 7, 0, 0),
+            BackColor = PanelBackColor,
+            ForeColor = TextColor,
+        };
+        modeAndOutput.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+        modeAndOutput.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        FlowLayoutPanel modeFlow = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = PanelBackColor, ForeColor = TextColor };
+        FlowLayoutPanel outputFlow = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = PanelBackColor, ForeColor = TextColor };
         appendMode.Text = "Append";
         appendMode.AutoSize = true;
         appendMode.Checked = true;
         overwriteMode.Text = "Overwrite";
         overwriteMode.AutoSize = true;
-        modeFlow.Padding = new Padding(6, 8, 0, 0);
+        normalOutput.Text = "Normal - 8m Tiles";
+        normalOutput.AutoSize = true;
+        normalOutput.Checked = true;
+        normalOutput.Enabled = true;
+        experimentalOutput.Text = "HD Test - 4m Tiles";
+        experimentalOutput.AutoSize = true;
+        experimentalOutput.Enabled = true;
         modeFlow.Controls.Add(appendMode);
         modeFlow.Controls.Add(overwriteMode);
-        modeBox.Controls.Add(modeFlow);
+        outputFlow.Controls.Add(normalOutput);
+        outputFlow.Controls.Add(experimentalOutput);
+        modeAndOutput.Controls.Add(modeFlow, 0, 0);
+        modeAndOutput.Controls.Add(outputFlow, 1, 0);
+        modeBox.Controls.Add(modeAndOutput);
 
-        GroupBox optionBox = new() { Text = "Options" };
+        GroupBox optionBox = new DarkGroupBox() { Text = "Build Options" };
         StyleGroupBox(optionBox);
         TableLayoutPanel optionPanel = new()
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 4,
-            Padding = new Padding(6, 8, 0, 0),
+            RowCount = 5,
+            Padding = new Padding(6, 7, 2, 5),
             BackColor = PanelBackColor,
             ForeColor = TextColor,
         };
-        optionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
-        optionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        optionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        createRouteTiles.Text = "Create Route Tiles";
+        optionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        optionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        for (int row = 0; row < optionPanel.RowCount; row++)
+        {
+            optionPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
+        }
+        createRouteTiles.Text = "Route Tiles";
         createRouteTiles.AutoSize = true;
         createRouteTiles.Checked = true;
-        distantMountains.Text = "Create DM Tiles";
+        distantMountains.Text = "DM Tiles";
         distantMountains.Checked = true;
         distantMountains.AutoSize = true;
-        createMapTiles.Text = "Create OSM/Map Tiles";
+        createMapTiles.Text = "OSM / Map Tiles";
         createMapTiles.Checked = true;
         createMapTiles.AutoSize = true;
         createMapTiles.Enabled = true;
-        createMosaicTiles.Text = "Create Mosaic Tiles";
-        createMosaicTiles.AutoSize = true;
-        createMosaicTiles.Enabled = false;
         cleanTileTemplate.Text = "Clean Tile Wipe (Destructive)";
         cleanTileTemplate.AutoSize = true;
         scanOverride.Text = "Scan Override";
         scanOverride.AutoSize = true;
-        enableHd4mTiles.Text = "Enable HD Mesh Tiles";
+        enableHd4mTiles.Text = "HD Mesh Tiles";
         enableHd4mTiles.AutoSize = true;
         enableHd4mTiles.Checked = false;
-        enableHdMapTiles.Text = "Enable HD Map Tiles";
+        enableHdMapTiles.Text = "HD Map Tiles";
         enableHdMapTiles.AutoSize = true;
         enableHdMapTiles.Checked = false;
         optionToolTip.SetToolTip(createRouteTiles,
@@ -482,8 +729,6 @@ internal sealed partial class TopoForm : Form
             "Create or update selected Distant Mountain tiles.");
         optionToolTip.SetToolTip(createMapTiles,
             "Create 2048 x 2048 OSM map tiles.");
-        optionToolTip.SetToolTip(createMosaicTiles,
-            "Not currently available.");
         optionToolTip.SetToolTip(cleanTileTemplate,
             "Destructive: rebuild selected terrain from clean templates.");
         optionToolTip.SetToolTip(scanOverride,
@@ -492,23 +737,36 @@ internal sealed partial class TopoForm : Form
             "Unlock 4m mesh output; otherwise terrain stays at 8m.");
         optionToolTip.SetToolTip(enableHdMapTiles,
             "Create 4096 x 4096 map tiles instead of 2048 x 2048.");
-        optionPanel.Controls.Add(enableHdMapTiles, 1, 2);
-        optionPanel.Controls.Add(enableHd4mTiles, 1, 3);
-        createRouteTiles.Margin = new Padding(3, 0, 3, 3);
-        cleanTileTemplate.Margin = new Padding(3, 0, 3, 3);
-        distantMountains.Margin = new Padding(3, 3, 3, 3);
-        scanOverride.Margin = new Padding(3, 3, 3, 3);
-        createMapTiles.Margin = new Padding(3, 3, 3, 3);
-        createMosaicTiles.Margin = new Padding(3, 3, 3, 3);
+        CheckBox[] buildOptionControls =
+        [
+            createRouteTiles,
+            distantMountains,
+            createMapTiles,
+            enableHdMapTiles,
+            enableHd4mTiles,
+            scanOverride,
+            cleanTileTemplate,
+        ];
+        foreach (CheckBox option in buildOptionControls)
+        {
+            option.AutoSize = false;
+            option.Dock = DockStyle.Fill;
+            option.TextAlign = ContentAlignment.MiddleLeft;
+            option.Margin = new Padding(3);
+        }
+
         optionPanel.Controls.Add(createRouteTiles, 0, 0);
-        optionPanel.Controls.Add(cleanTileTemplate, 1, 0);
+        optionPanel.Controls.Add(enableHd4mTiles, 1, 0);
         optionPanel.Controls.Add(distantMountains, 0, 1);
-        optionPanel.Controls.Add(scanOverride, 1, 1);
         optionPanel.Controls.Add(createMapTiles, 0, 2);
-        optionPanel.Controls.Add(createMosaicTiles, 0, 3);
+        optionPanel.Controls.Add(enableHdMapTiles, 1, 2);
+        optionPanel.Controls.Add(scanOverride, 0, 3);
+        optionPanel.SetColumnSpan(scanOverride, 2);
+        optionPanel.Controls.Add(cleanTileTemplate, 0, 4);
+        optionPanel.SetColumnSpan(cleanTileTemplate, 2);
         optionBox.Controls.Add(optionPanel);
 
-        GroupBox coverageBox = new() { Text = "Selection" };
+        GroupBox coverageBox = new DarkGroupBox() { Text = "Selection" };
         StyleGroupBox(coverageBox);
         TableLayoutPanel coverage = new()
         {
@@ -530,17 +788,19 @@ internal sealed partial class TopoForm : Form
         kmlCoverage.AutoSize = true;
         trackDatabaseCoverage.Text = "Use Track Database";
         trackDatabaseCoverage.AutoSize = true;
-        trackDatabaseCoverage.Margin = new Padding(3, 3, 3, 10);
+        trackDatabaseCoverage.Margin = new Padding(3, 3, 3, 6);
         textFileCoverage.Text = "Use Text File";
         textFileCoverage.AutoSize = true;
         terrainRadius.Minimum = 0;
         terrainRadius.Maximum = 100;
-        terrainRadius.Value = 1;
+        terrainRadius.Value = 2;
         terrainRadius.Enabled = false;
         loTileRadius.Minimum = 1;
         loTileRadius.Maximum = 100;
         loTileRadius.Value = 1;
         loTileRadius.Enabled = false;
+        StyleNumericInput(terrainRadius);
+        StyleNumericInput(loTileRadius);
 
         coverage.Controls.Add(existingTilesCoverage, 0, 0);
         coverage.SetColumnSpan(existingTilesCoverage, 2);
@@ -551,9 +811,9 @@ internal sealed partial class TopoForm : Form
             AutoSize = false,
             BorderStyle = BorderStyle.Fixed3D,
             Height = 2,
-            Margin = new Padding(0, 8, 0, 8),
+            Margin = new Padding(0, 4, 0, 4),
             Dock = DockStyle.Fill,
-            BackColor = Color.FromArgb(210, 205, 196),
+            BackColor = Color.FromArgb(70, 70, 70),
         };
         coverage.Controls.Add(separator, 0, 2);
         coverage.SetColumnSpan(separator, 2);
@@ -563,8 +823,8 @@ internal sealed partial class TopoForm : Form
         coverage.SetColumnSpan(kmlCoverage, 2);
         coverage.Controls.Add(trackDatabaseCoverage, 0, 5);
         coverage.SetColumnSpan(trackDatabaseCoverage, 2);
-        coverage.Controls.Add(new Label { AutoSize = true, Text = "Tile Radius:", Margin = new Padding(3, 8, 3, 3) }, 0, 6);
-        terrainRadius.Margin = new Padding(3, 8, 3, 3);
+        coverage.Controls.Add(new Label { AutoSize = true, Text = "Tile Radius:", Margin = new Padding(3, 4, 3, 3) }, 0, 6);
+        terrainRadius.Margin = new Padding(3, 4, 3, 3);
         coverage.Controls.Add(terrainRadius, 1, 6);
         coverage.Controls.Add(new Label { AutoSize = true, Text = "DM Radius:" }, 0, 7);
         coverage.Controls.Add(loTileRadius, 1, 7);
@@ -574,67 +834,83 @@ internal sealed partial class TopoForm : Form
             "Expands Distant Mountain coverage by this many DM tiles in every direction. Suggested: 1.");
 
         coverageBox.Controls.Add(coverage);
-        Control outputPanel = BuildOutputPanel();
-        Control postProcessPanel = BuildPostProcessPanel();
-        Control statusPanel = BuildStatusPanel();
+
+        modeBox.Margin = new Padding(0, 0, 0, 8);
+        coverageBox.Margin = new Padding(0, 0, 0, 8);
+        optionBox.Margin = new Padding(0, 0, 0, 4);
         panel.Controls.Add(modeBox);
-        panel.Controls.Add(optionBox);
         panel.Controls.Add(coverageBox);
-        panel.Controls.Add(outputPanel);
-        panel.Controls.Add(postProcessPanel);
-        panel.Controls.Add(statusPanel);
+        panel.Controls.Add(optionBox);
 
-        void LayoutOptionControls()
+        void SizeConfigurationCards()
         {
-            int gap = 8;
-            int columnWidth = (panel.ClientSize.Width - gap) / 2;
-            int rightX = columnWidth + gap;
-            modeBox.SetBounds(0, 0, columnWidth, 138);
-            optionBox.SetBounds(rightX, 0, panel.ClientSize.Width - rightX, 138);
-            coverageBox.SetBounds(0, 148, columnWidth, 286);
-            outputPanel.SetBounds(0, 442, columnWidth, 94);
-            statusPanel.SetBounds(rightX, 148, panel.ClientSize.Width - rightX, 216);
-            postProcessPanel.SetBounds(rightX, 372, panel.ClientSize.Width - rightX, 164);
+            int gap = ScaleLayoutPixels(6);
+            int modeHeight = ScaleLayoutPixels(88);
+            int coverageHeight = ScaleLayoutPixels(230);
+            int optionHeight = ScaleLayoutPixels(153);
+            int cardWidth = Math.Max(
+                ScaleLayoutPixels(230),
+                panel.ClientSize.Width - panel.Padding.Horizontal);
+            int x = panel.Padding.Left;
+            int y = panel.Padding.Top;
+            modeBox.SetBounds(x, y, cardWidth, modeHeight);
+            y += modeHeight + gap;
+            coverageBox.SetBounds(x, y, cardWidth, coverageHeight);
+            y += coverageHeight + gap;
+            optionBox.SetBounds(x, y, cardWidth, optionHeight);
         }
-
-        panel.Resize += (_, _) => LayoutOptionControls();
-        panel.HandleCreated += (_, _) => LayoutOptionControls();
+        panel.Resize += (_, _) => SizeConfigurationCards();
+        panel.HandleCreated += (_, _) => SizeConfigurationCards();
         return panel;
     }
 
-    private Control BuildOutputPanel()
+    private Control BuildOperationalPanel()
     {
-        GroupBox outputBox = new() { Text = "Terrain Output" };
-        StyleGroupBox(outputBox);
-        FlowLayoutPanel outputFlow = new()
+        Panel panel = new()
         {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            Padding = new Padding(6, 8, 0, 0),
-            BackColor = PanelBackColor,
-            ForeColor = TextColor,
+            Dock = DockStyle.Top,
+            Height = ScaleLayoutPixels(216),
+            MinimumSize = new Size(0, ScaleLayoutPixels(216)),
+            Margin = new Padding(0, 0, 0, 7),
+            BackColor = AppBackColor,
         };
+        Control statusPanel = BuildStatusPanel();
+        Control postProcessPanel = BuildPostProcessPanel();
+        panel.Controls.Add(statusPanel);
+        panel.Controls.Add(postProcessPanel);
 
-        normalOutput.Text = "Normal - 8m Tiles";
-        normalOutput.AutoSize = true;
-        normalOutput.Checked = true;
-        normalOutput.Enabled = true;
-        experimentalOutput.Text = "HD Test - 4m Tiles";
-        experimentalOutput.AutoSize = true;
-        experimentalOutput.Enabled = true;
-        outputFlow.Controls.Add(normalOutput);
-        outputFlow.Controls.Add(experimentalOutput);
-        outputBox.Controls.Add(outputFlow);
-        return outputBox;
+        void LayoutOperationalCards()
+        {
+            int gap = ScaleLayoutPixels(8);
+            int statusHeight = ScaleLayoutPixels(216);
+            int biasHeight = ScaleLayoutPixels(152);
+            if (panel.ClientSize.Width >= ScaleLayoutPixels(620))
+            {
+                int statusWidth = (int)Math.Round((panel.ClientSize.Width - gap) * 0.52);
+                panel.Height = statusHeight;
+                panel.MinimumSize = new Size(0, statusHeight);
+                statusPanel.SetBounds(0, 0, statusWidth, statusHeight);
+                postProcessPanel.SetBounds(statusWidth + gap, 0, panel.ClientSize.Width - statusWidth - gap, statusHeight);
+                return;
+            }
+
+            int stackedHeight = statusHeight + gap + biasHeight;
+            panel.Height = stackedHeight;
+            panel.MinimumSize = new Size(0, stackedHeight);
+            statusPanel.SetBounds(0, 0, panel.ClientSize.Width, statusHeight);
+            postProcessPanel.SetBounds(0, statusHeight + gap, panel.ClientSize.Width, biasHeight);
+        }
+
+        panel.Resize += (_, _) => LayoutOperationalCards();
+        panel.HandleCreated += (_, _) => LayoutOperationalCards();
+        return panel;
     }
-
     // Bias controls serve two purposes: during Run they shift where DEM samples
     // are taken from; during Commit/Post Processing they resample existing
     // terrain only, which is faster but slightly less faithful than rerunning DEM.
     private Control BuildPostProcessPanel()
     {
-        GroupBox postBox = new() { Text = "Advanced Geo Bias" };
+        GroupBox postBox = new DarkGroupBox() { Text = "Advanced Geo Bias" };
         StyleGroupBox(postBox);
         TableLayoutPanel shell = new()
         {
@@ -665,8 +941,8 @@ internal sealed partial class TopoForm : Form
         shift.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         shift.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         shift.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        shift.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        shift.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        shift.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        shift.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         ConfigureBiasControls(postEastWestShiftSlider, postEastWestShiftValue);
         ConfigureBiasControls(postNorthSouthShiftSlider, postNorthSouthShiftValue);
@@ -674,7 +950,7 @@ internal sealed partial class TopoForm : Form
         AddBiasRow(shift, 1, "E", "W", postEastWestShiftSlider, postEastWestShiftValue);
 
         commitPostProcessButton.Text = "Commit";
-        StyleButton(commitPostProcessButton, primary: true);
+        StyleButton(commitPostProcessButton, accent: true);
         commitPostProcessButton.Click += CommitPostProcess_Click;
         FlowLayoutPanel postProcessAction = new()
         {
@@ -689,7 +965,7 @@ internal sealed partial class TopoForm : Form
         {
             AutoSize = true,
             Anchor = AnchorStyles.Left,
-            Font = new Font("Segoe UI", 9, FontStyle.Regular),
+            Font = new Font("Segoe UI", 9f, FontStyle.Regular),
             ForeColor = MutedTextColor,
             Text = "Post Processing:",
             Margin = new Padding(0, 7, 6, 0),
@@ -703,7 +979,7 @@ internal sealed partial class TopoForm : Form
         return postBox;
     }
 
-    private static void ConfigureBiasControls(TrackBar slider, NumericUpDown value)
+    private void ConfigureBiasControls(DarkTrackBar slider, DarkNumericInput value)
     {
         slider.Minimum = -100;
         slider.Maximum = 100;
@@ -712,16 +988,18 @@ internal sealed partial class TopoForm : Form
         slider.LargeChange = 5;
         slider.Value = 0;
         slider.AutoSize = false;
-        slider.Height = 28;
-        slider.Width = 220;
+        slider.Height = ScalePixels(28);
+        slider.Width = ScalePixels(220);
         slider.Anchor = AnchorStyles.Left | AnchorStyles.Right;
 
         value.Minimum = -100;
         value.Maximum = 100;
         value.Increment = 1;
         value.Value = 0;
-        value.Width = 58;
+        value.Width = ScalePixels(58);
         value.TextAlign = HorizontalAlignment.Right;
+        StyleNumericInput(value);
+        slider.BackColor = PanelBackColor;
 
         slider.ValueChanged += (_, _) =>
         {
@@ -741,7 +1019,7 @@ internal sealed partial class TopoForm : Form
         };
     }
 
-    private static void AddBiasRow(TableLayoutPanel bias, int row, string positiveDirection, string negativeDirection, TrackBar slider, NumericUpDown value)
+    private static void AddBiasRow(TableLayoutPanel bias, int row, string positiveDirection, string negativeDirection, DarkTrackBar slider, DarkNumericInput value)
     {
         bias.Controls.Add(new Label { AutoSize = true, Text = positiveDirection, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 6, 3) }, 0, row);
         bias.Controls.Add(slider, 1, row);
@@ -752,7 +1030,7 @@ internal sealed partial class TopoForm : Form
 
     private Control BuildStatusPanel()
     {
-        GroupBox statusBox = new() { Text = "Status" };
+        GroupBox statusBox = new DarkGroupBox() { Text = "Status" };
         StyleGroupBox(statusBox);
         TableLayoutPanel status = new()
         {
@@ -787,35 +1065,37 @@ internal sealed partial class TopoForm : Form
         return statusBox;
     }
 
-    private static void AddStatusHeader(TableLayoutPanel status, string text, int column)
+    private void AddStatusHeader(TableLayoutPanel status, string text, int column)
     {
         Label label = new()
         {
             AutoSize = true,
             Text = text,
-            Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+            Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold),
             ForeColor = AccentColor,
             Anchor = AnchorStyles.Left,
+            Margin = new Padding(3, 0, 3, 0),
         };
         status.Controls.Add(label, column, 0);
     }
 
-    private static void AddStatusRow(TableLayoutPanel status, int row, string title, Label tileValue, Label dmValue, bool indentTitle = false)
+    private void AddStatusRow(TableLayoutPanel status, int row, string title, Label tileValue, Label dmValue, bool indentTitle = false)
     {
-        status.Controls.Add(new Label { AutoSize = true, Text = title, Anchor = AnchorStyles.Left, ForeColor = TextColor, Margin = indentTitle ? new Padding(16, 3, 3, 3) : new Padding(3) }, 0, row);
+        status.Controls.Add(new Label { AutoSize = true, Text = title, Anchor = AnchorStyles.Left, ForeColor = TextColor, Margin = indentTitle ? new Padding(16, 0, 3, 0) : new Padding(3, 0, 3, 0) }, 0, row);
         ConfigureStatusValue(tileValue);
         ConfigureStatusValue(dmValue);
         status.Controls.Add(tileValue, 1, row);
         status.Controls.Add(dmValue, 2, row);
     }
 
-    private static void ConfigureStatusValue(Label label)
+    private void ConfigureStatusValue(Label label)
     {
         label.AutoSize = true;
         label.Text = "0";
-        label.Font = new Font("Consolas", 9);
+        label.Font = new Font("Consolas", 9f);
         label.ForeColor = MutedTextColor;
         label.Anchor = AnchorStyles.Left;
+        label.Margin = new Padding(3, 0, 3, 0);
     }
 
     private Control BuildButtonPanel()
@@ -823,14 +1103,13 @@ internal sealed partial class TopoForm : Form
         TableLayoutPanel panel = new()
         {
             Dock = DockStyle.Top,
-            Padding = new Padding(0, 8, 0, 8),
+            Padding = new Padding(0, 5, 0, 5),
             AutoSize = true,
-            ColumnCount = 3,
+            ColumnCount = 2,
             BackColor = AppBackColor,
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         FlowLayoutPanel leftButtons = new()
         {
             Dock = DockStyle.Left,
@@ -839,48 +1118,30 @@ internal sealed partial class TopoForm : Form
             WrapContents = false,
             BackColor = AppBackColor,
         };
-        FlowLayoutPanel rightButtons = new()
-        {
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            BackColor = AppBackColor,
-        };
         scanButton.Text = "Scan";
-        StyleButton(scanButton, primary: true);
+        StyleButton(scanButton, accent: true);
         scanButton.Click += Scan_Click;
         runButton.Text = "Run";
-        StyleButton(runButton, primary: true);
+        StyleButton(runButton, accent: true);
         runButton.Click += Run_Click;
         abortButton.Text = "Abort";
-        StyleButton(abortButton);
+        StyleButton(abortButton, accent: true);
         abortButton.Click += Abort_Click;
         exitButton.Text = "Exit";
-        StyleButton(exitButton);
+        StyleButton(exitButton, accent: true);
         exitButton.Click += (_, _) => Close();
         leftButtons.Controls.Add(scanButton);
         leftButtons.Controls.Add(runButton);
         leftButtons.Controls.Add(abortButton);
         leftButtons.Controls.Add(exitButton);
-        contactButton.Text = "Contact";
-        StyleButton(contactButton, primary: true);
-        contactButton.Anchor = AnchorStyles.Right;
-        contactButton.Click += Contact_Click;
-        helpButton.Text = "Help";
-        StyleButton(helpButton, primary: true);
-        helpButton.Anchor = AnchorStyles.Right;
-        helpButton.Click += Help_Click;
-        rightButtons.Controls.Add(contactButton);
-        rightButtons.Controls.Add(helpButton);
-
         globalModeIndicator.AutoSize = false;
-        globalModeIndicator.Size = new Size(230, 28);
-        globalModeIndicator.MinimumSize = new Size(230, 28);
+        globalModeIndicator.Size = new Size(ScalePixels(230), ScalePixels(28));
+        globalModeIndicator.MinimumSize = globalModeIndicator.Size;
         globalModeIndicator.Text = "READY";
         globalModeIndicator.TextAlign = ContentAlignment.MiddleCenter;
-        globalModeIndicator.Font = new Font("Segoe UI Semibold", 9, FontStyle.Bold);
+        globalModeIndicator.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
         globalModeIndicator.ForeColor = WarningColor;
-        globalModeIndicator.BackColor = Color.FromArgb(247, 231, 196);
+        globalModeIndicator.BackColor = HeaderBackColor;
         globalModeIndicator.BorderStyle = BorderStyle.FixedSingle;
         globalModeIndicator.Margin = new Padding(4, 3, 4, 3);
         globalModeIndicator.Anchor = AnchorStyles.None;
@@ -888,7 +1149,6 @@ internal sealed partial class TopoForm : Form
 
         panel.Controls.Add(leftButtons, 0, 0);
         panel.Controls.Add(globalModeIndicator, 1, 0);
-        panel.Controls.Add(rightButtons, 2, 0);
         return panel;
     }
 
@@ -919,6 +1179,7 @@ internal sealed partial class TopoForm : Form
             BackColor = AppBackColor,
             ClientSize = new Size(imageSize.Width + 24, imageSize.Height + 24),
         };
+        ConfigureDarkDialog(dialog);
         PictureBox picture = new()
         {
             Dock = DockStyle.Fill,
@@ -982,6 +1243,7 @@ internal sealed partial class TopoForm : Form
             Icon = Icon,
         };
 
+        ConfigureDarkDialog(dialog);
         RichTextBox documentText = new()
         {
             Dock = DockStyle.Fill,
@@ -989,14 +1251,22 @@ internal sealed partial class TopoForm : Form
             ScrollBars = RichTextBoxScrollBars.Vertical,
             WordWrap = true,
             DetectUrls = false,
-            Font = new Font("Segoe UI", 10f),
-            BackColor = Color.White,
-            ForeColor = TextColor,
+            Font = new Font("Segoe UI", 11.5f),
+            BackColor = LogBackColor,
+            ForeColor = HelpTextColor,
             BorderStyle = BorderStyle.FixedSingle,
             ShortcutsEnabled = true,
             Margin = new Padding(12),
         };
         FormatHelpDocument(documentText, text);
+
+        Panel documentFrame = new()
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(12),
+            BackColor = AppBackColor,
+        };
+        documentFrame.Controls.Add(documentText);
 
         Button closeButton = new()
         {
@@ -1006,7 +1276,7 @@ internal sealed partial class TopoForm : Form
             Width = 86,
             Height = 28,
         };
-        StyleButton(closeButton, primary: true);
+        StyleButton(closeButton, accent: true);
 
         FlowLayoutPanel buttons = new()
         {
@@ -1020,7 +1290,7 @@ internal sealed partial class TopoForm : Form
 
         dialog.AcceptButton = closeButton;
         dialog.CancelButton = closeButton;
-        dialog.Controls.Add(documentText);
+        dialog.Controls.Add(documentFrame);
         dialog.Controls.Add(buttons);
         dialog.ShowDialog(this);
     }
@@ -1032,7 +1302,7 @@ internal sealed partial class TopoForm : Form
         box.SuspendLayout();
         box.Clear();
         box.SelectionColor = HelpTextColor;
-        box.SelectionFont = new Font("Segoe UI", 10f);
+        box.SelectionFont = new Font("Segoe UI", 11.5f);
 
         string[] lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         for (int i = 0; i < lines.Length; i++)
@@ -1068,7 +1338,7 @@ internal sealed partial class TopoForm : Form
 
             if (trimmed.EndsWith(':') && trimmed.Length <= 48 && !trimmed.Contains('\\'))
             {
-                AppendHelpText(box, trimmed + Environment.NewLine, CreateHelpBoldFont(10f), HelpTextColor);
+                AppendHelpIndentedText(box, trimmed + Environment.NewLine, CreateHelpBoldFont(11.5f), HelpTextColor);
                 continue;
             }
 
@@ -1078,7 +1348,21 @@ internal sealed partial class TopoForm : Form
                 continue;
             }
 
-            AppendHelpParagraph(box, trimmed);
+            StringBuilder paragraph = new(trimmed);
+            while (i + 1 < lines.Length)
+            {
+                string candidateLine = lines[i + 1];
+                string candidateNext = i + 2 < lines.Length ? lines[i + 2].Trim() : "";
+                if (IsHelpStructuralLine(candidateLine, candidateNext))
+                {
+                    break;
+                }
+
+                paragraph.Append(' ').Append(candidateLine.Trim());
+                i++;
+            }
+
+            AppendHelpParagraph(box, paragraph.ToString());
         }
 
         box.SelectionStart = 0;
@@ -1100,6 +1384,18 @@ internal sealed partial class TopoForm : Form
             trimmed.EndsWith(".txt", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsHelpStructuralLine(string line, string nextLine)
+    {
+        string trimmed = line.Trim();
+        return trimmed.Length == 0 ||
+            IsRuleLine(trimmed) ||
+            IsRuleLine(nextLine) ||
+            trimmed.StartsWith("- ", StringComparison.Ordinal) ||
+            (Regex.IsMatch(trimmed, @"^\d+\.\s+") && line.StartsWith("  ", StringComparison.Ordinal)) ||
+            (trimmed.EndsWith(':') && trimmed.Length <= 48 && !trimmed.Contains('\\')) ||
+            IsExampleLine(line);
+    }
+
     private void AppendHelpHeading(RichTextBox box, string text, bool title)
     {
         if (box.TextLength > 0)
@@ -1108,36 +1404,49 @@ internal sealed partial class TopoForm : Form
         }
 
         Font font = title
-            ? CreateHelpBoldFont(18f)
-            : CreateHelpBoldFont(12.5f);
-        AppendHelpText(box, text + Environment.NewLine, font, HelpTextColor);
+            ? CreateHelpBoldFont(20f)
+            : CreateHelpBoldFont(14f);
+        AppendHelpIndentedText(box, text + Environment.NewLine, font, AccentColor);
         if (!title)
         {
-            AppendHelpText(box, new string('-', 48) + Environment.NewLine, new Font("Segoe UI", 7f), Color.FromArgb(210, 204, 194));
+            AppendHelpIndentedText(box, new string('-', 48) + Environment.NewLine, new Font("Segoe UI", 7f), Color.FromArgb(210, 204, 194));
         }
     }
 
     private void AppendHelpParagraph(RichTextBox box, string text)
     {
-        AppendHelpText(box, text + Environment.NewLine, new Font("Segoe UI", 10f), HelpTextColor);
+        AppendHelpIndentedText(box, text + Environment.NewLine, new Font("Segoe UI", 11.5f), HelpTextColor);
     }
 
     private void AppendHelpBullet(RichTextBox box, string text)
     {
         box.SelectionBullet = true;
-        box.SelectionIndent = 24;
+        box.SelectionIndent = 38;
+        box.SelectionRightIndent = 10;
         box.SelectionHangingIndent = 8;
-        AppendHelpText(box, text + Environment.NewLine, new Font("Segoe UI", 10f), HelpTextColor);
+        AppendHelpText(box, text + Environment.NewLine, new Font("Segoe UI", 11.5f), HelpTextColor);
         box.SelectionBullet = false;
         box.SelectionIndent = 0;
+        box.SelectionRightIndent = 0;
         box.SelectionHangingIndent = 0;
     }
 
     private void AppendHelpExample(RichTextBox box, string text)
     {
-        box.SelectionIndent = 18;
-        AppendHelpText(box, text + Environment.NewLine, new Font("Consolas", 9.25f), HelpTextColor);
+        box.SelectionIndent = 32;
+        box.SelectionRightIndent = 10;
+        AppendHelpText(box, text + Environment.NewLine, new Font("Consolas", 10.5f), HelpTextColor);
         box.SelectionIndent = 0;
+        box.SelectionRightIndent = 0;
+    }
+
+    private static void AppendHelpIndentedText(RichTextBox box, string text, Font font, Color color)
+    {
+        box.SelectionIndent = 14;
+        box.SelectionRightIndent = 10;
+        AppendHelpText(box, text, font, color);
+        box.SelectionIndent = 0;
+        box.SelectionRightIndent = 0;
     }
 
     private static void AppendHelpText(RichTextBox box, string text, Font font, Color color)
@@ -1345,6 +1654,18 @@ internal sealed partial class TopoForm : Form
             scanCancellation?.Dispose();
             scanCancellation = null;
             SetScanning(false);
+            if (runButton.Enabled)
+            {
+                runButton.Select();
+            }
+            else if (scanButton.Enabled)
+            {
+                scanButton.Select();
+            }
+            else if (abortButton.Enabled)
+            {
+                abortButton.Select();
+            }
         }
     }
 
@@ -1969,12 +2290,16 @@ internal sealed partial class TopoForm : Form
         helpButton.Enabled = true;
 
         SetButtonPrimary(scanButton, scanButton.Enabled);
-        SetButtonPrimary(runButton, runButton.Enabled);
-        SetButtonPrimary(abortButton, abortButton.Enabled);
-        SetButtonPrimary(exitButton, exitButton.Enabled);
-        SetButtonPrimary(commitPostProcessButton, commitPostProcessButton.Enabled);
-        SetButtonPrimary(contactButton, true);
-        SetButtonPrimary(helpButton, true);
+        SetButtonPrimary(runButton, runButton.Enabled && !busy);
+        SetButtonAccent(abortButton);
+        SetButtonAccent(exitButton);
+        SetButtonAccent(commitPostProcessButton);
+        SetButtonAccent(contactButton);
+        SetButtonAccent(helpButton);
+        if (busy)
+        {
+            logText.Select();
+        }
     }
 
     private void ResetScanState()
@@ -2179,11 +2504,6 @@ internal sealed partial class TopoForm : Form
         }
 
         return "";
-    }
-
-    private static Image? LoadTitleImage()
-    {
-        return LoadContentImage("SCO-LIDEX-Header.png");
     }
 
     private static Image? LoadContentImage(string fileName)
@@ -2423,7 +2743,7 @@ internal sealed partial class TopoForm : Form
         globalModeIndicator.Text = message;
         globalModeIndicator.Visible = true;
         globalModeIndicator.ForeColor = WarningColor;
-        globalModeIndicator.BackColor = Color.FromArgb(247, 231, 196);
+        globalModeIndicator.BackColor = HeaderBackColor;
 
         if (operationMessageAnimated)
         {
@@ -2554,6 +2874,578 @@ internal sealed partial class TopoForm : Form
         }
     }
 
+    private sealed class NoFocusEmphasisButton : Button
+    {
+        protected override bool ShowFocusCues => false;
+
+        public override void NotifyDefault(bool value)
+        {
+            base.NotifyDefault(false);
+        }
+    }
+
+    private sealed class MeshGlobeControl : Control
+    {
+        public MeshGlobeControl()
+        {
+            SetStyle(
+                ControlStyles.UserPaint |
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.SupportsTransparentBackColor,
+                true);
+            BackColor = Color.Transparent;
+            TabStop = false;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (ClientSize.Width < 12 || ClientSize.Height < 12)
+            {
+                return;
+            }
+
+            float scale = DeviceDpi / 96f;
+            float diameter = Math.Min(ClientSize.Width, ClientSize.Height) - (8f * scale);
+            RectangleF globe = new(
+                (ClientSize.Width - diameter) / 2f,
+                (ClientSize.Height - diameter) / 2f,
+                diameter,
+                diameter);
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            using Pen mesh = new(AccentColor, Math.Max(1f, 1.15f * scale));
+            using Pen outline = new(AccentColor, Math.Max(1.5f, 2f * scale));
+            using GraphicsPath clipPath = new();
+            clipPath.AddEllipse(globe);
+            GraphicsState state = e.Graphics.Save();
+            e.Graphics.SetClip(clipPath);
+
+            e.Graphics.DrawLine(
+                mesh,
+                globe.Left,
+                globe.Top + (globe.Height / 2f),
+                globe.Right,
+                globe.Top + (globe.Height / 2f));
+            e.Graphics.DrawLine(
+                mesh,
+                globe.Left + (globe.Width / 2f),
+                globe.Top,
+                globe.Left + (globe.Width / 2f),
+                globe.Bottom);
+            e.Graphics.DrawEllipse(
+                mesh,
+                globe.Left + (globe.Width * 0.27f),
+                globe.Top,
+                globe.Width * 0.46f,
+                globe.Height);
+            e.Graphics.DrawEllipse(
+                mesh,
+                globe.Left,
+                globe.Top + (globe.Height * 0.28f),
+                globe.Width,
+                globe.Height * 0.44f);
+
+            e.Graphics.Restore(state);
+            e.Graphics.DrawEllipse(outline, globe);
+        }
+    }
+
+    private enum ButtonEmphasis
+    {
+        Neutral,
+        Accent,
+        Primary,
+    }
+
+    private sealed class DarkRadioButton : RadioButton
+    {
+        public DarkRadioButton()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor);
+            int glyphSize = ScaleLogical(13);
+            int glyphY = Math.Max(0, (ClientSize.Height - glyphSize) / 2);
+            Rectangle glyph = new(1, glyphY, glyphSize, glyphSize);
+            Color borderColor = Enabled ? Color.FromArgb(185, 185, 185) : Color.FromArgb(102, 102, 102);
+            using Pen border = new(borderColor, Math.Max(1, ScaleLogical(1)));
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.DrawEllipse(border, glyph);
+            if (Checked)
+            {
+                int inset = Math.Max(3, ScaleLogical(4));
+                Rectangle dot = Rectangle.Inflate(glyph, -inset, -inset);
+                using SolidBrush fill = new(Enabled ? AccentColor : Color.FromArgb(118, 118, 118));
+                e.Graphics.FillEllipse(fill, dot);
+            }
+
+            DrawToggleText(e.Graphics, glyph.Right + ScaleLogical(6));
+        }
+
+        public override Size GetPreferredSize(Size proposedSize) => PreferredToggleSize(this);
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            base.OnEnabledChanged(e);
+            Invalidate();
+        }
+
+        protected override void OnCheckedChanged(EventArgs e)
+        {
+            base.OnCheckedChanged(e);
+            Invalidate();
+        }
+
+        private void DrawToggleText(Graphics graphics, int left)
+        {
+            Color color = Enabled ? ForeColor : Color.FromArgb(132, 132, 132);
+            TextRenderer.DrawText(graphics, Text, Font,
+                new Rectangle(left, 0, Math.Max(0, ClientSize.Width - left), ClientSize.Height), color,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
+                TextFormatFlags.NoPrefix);
+        }
+
+        private int ScaleLogical(int value) => Math.Max(1, (int)Math.Round(value * DeviceDpi / 96f));
+    }
+
+    private sealed class DarkCheckBox : CheckBox
+    {
+        public DarkCheckBox()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor);
+            int glyphSize = ScaleLogical(13);
+            int glyphY = Math.Max(0, (ClientSize.Height - glyphSize) / 2);
+            Rectangle glyph = new(1, glyphY, glyphSize, glyphSize);
+            using SolidBrush fill = new(Color.FromArgb(28, 28, 28));
+            using Pen border = new(Enabled ? Color.FromArgb(185, 185, 185) : Color.FromArgb(102, 102, 102));
+            e.Graphics.FillRectangle(fill, glyph);
+            e.Graphics.DrawRectangle(border, glyph);
+            if (Checked)
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using Pen check = new(Enabled ? AccentColor : Color.FromArgb(118, 118, 118), ScaleLogical(2));
+                Point a = new(glyph.Left + ScaleLogical(3), glyph.Top + ScaleLogical(7));
+                Point b = new(glyph.Left + ScaleLogical(6), glyph.Bottom - ScaleLogical(3));
+                Point c = new(glyph.Right - ScaleLogical(2), glyph.Top + ScaleLogical(3));
+                e.Graphics.DrawLines(check, [a, b, c]);
+            }
+
+            int textLeft = glyph.Right + ScaleLogical(6);
+            Color color = Enabled ? ForeColor : Color.FromArgb(132, 132, 132);
+            TextRenderer.DrawText(e.Graphics, Text, Font,
+                new Rectangle(textLeft, 0, Math.Max(0, ClientSize.Width - textLeft), ClientSize.Height), color,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
+                TextFormatFlags.NoPrefix);
+        }
+
+        public override Size GetPreferredSize(Size proposedSize) => PreferredToggleSize(this);
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            base.OnEnabledChanged(e);
+            Invalidate();
+        }
+
+        protected override void OnCheckedChanged(EventArgs e)
+        {
+            base.OnCheckedChanged(e);
+            Invalidate();
+        }
+
+        private int ScaleLogical(int value) => Math.Max(1, (int)Math.Round(value * DeviceDpi / 96f));
+    }
+
+    private static Size PreferredToggleSize(Control control)
+    {
+        Size textSize = TextRenderer.MeasureText(control.Text, control.Font, Size.Empty,
+            TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+        int glyphAndGap = Math.Max(28, (int)Math.Round(28 * control.DeviceDpi / 96f));
+        return new Size(textSize.Width + glyphAndGap + control.Padding.Horizontal,
+            Math.Max(textSize.Height, Math.Max(17, (int)Math.Round(17 * control.DeviceDpi / 96f))) +
+            control.Padding.Vertical);
+    }
+
+    private sealed class DarkNumericInput : Control
+    {
+        private readonly TextBox editor;
+        private decimal minimum;
+        private decimal maximum = 100;
+        private decimal increment = 1;
+        private decimal currentValue;
+        private bool updatingText;
+
+        public DarkNumericInput()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw | ControlStyles.UserPaint | ControlStyles.Selectable, true);
+            TabStop = false;
+            editor = new TextBox
+            {
+                BorderStyle = BorderStyle.None,
+                BackColor = InputBackColor,
+                ForeColor = TextColor,
+                TextAlign = HorizontalAlignment.Right,
+                TabStop = true,
+            };
+            editor.TextChanged += (_, _) => ReadEditorValue();
+            editor.LostFocus += (_, _) => UpdateEditorText();
+            editor.KeyDown += Editor_KeyDown;
+            Controls.Add(editor);
+            Size = new Size(120, 23);
+            UpdateEditorText();
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public decimal Minimum
+        {
+            get => minimum;
+            set
+            {
+                minimum = value;
+                if (maximum < minimum) maximum = minimum;
+                Value = currentValue;
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public decimal Maximum
+        {
+            get => maximum;
+            set
+            {
+                maximum = Math.Max(value, minimum);
+                Value = currentValue;
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public decimal Increment
+        {
+            get => increment;
+            set => increment = Math.Max(0.0001m, value);
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public decimal Value
+        {
+            get => currentValue;
+            set
+            {
+                decimal adjusted = Math.Clamp(value, minimum, maximum);
+                if (adjusted == currentValue)
+                {
+                    UpdateEditorText();
+                    return;
+                }
+                currentValue = adjusted;
+                UpdateEditorText();
+                ValueChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public HorizontalAlignment TextAlign
+        {
+            get => editor.TextAlign;
+            set => editor.TextAlign = value;
+        }
+
+        public event EventHandler? ValueChanged;
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor);
+            Rectangle borderBounds = new(0, 0, Math.Max(0, Width - 1), Math.Max(0, Height - 1));
+            int buttonWidth = ScaleLogical(18);
+            int buttonLeft = Math.Max(0, Width - buttonWidth);
+            Color borderColor = Enabled ? Color.FromArgb(104, 104, 104) : Color.FromArgb(68, 68, 68);
+            using Pen border = new(borderColor);
+            using SolidBrush buttons = new(Enabled ? Color.FromArgb(45, 45, 45) : Color.FromArgb(36, 36, 36));
+            e.Graphics.FillRectangle(buttons, buttonLeft, 1, buttonWidth - 1, Math.Max(0, Height - 2));
+            e.Graphics.DrawRectangle(border, borderBounds);
+            e.Graphics.DrawLine(border, buttonLeft, 1, buttonLeft, Height - 2);
+            e.Graphics.DrawLine(border, buttonLeft, Height / 2, Width - 2, Height / 2);
+
+            Color arrowColor = Enabled ? AccentColor : Color.FromArgb(100, 100, 100);
+            using Pen arrow = new(arrowColor, ScaleLogical(1));
+            int centerX = buttonLeft + (buttonWidth / 2);
+            int topY = Height / 4;
+            int bottomY = (Height * 3) / 4;
+            int arm = ScaleLogical(3);
+            e.Graphics.DrawLines(arrow,
+                [new Point(centerX - arm, topY + 1), new Point(centerX, topY - 2), new Point(centerX + arm, topY + 1)]);
+            e.Graphics.DrawLines(arrow,
+                [new Point(centerX - arm, bottomY - 1), new Point(centerX, bottomY + 2), new Point(centerX + arm, bottomY - 1)]);
+        }
+
+        protected override void OnLayout(LayoutEventArgs levent)
+        {
+            base.OnLayout(levent);
+            int buttonWidth = ScaleLogical(18);
+            int editorHeight = Math.Min(editor.PreferredHeight, Math.Max(1, Height - 4));
+            editor.SetBounds(4, Math.Max(2, (Height - editorHeight) / 2),
+                Math.Max(1, Width - buttonWidth - 7), editorHeight);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (!Enabled) return;
+            Focus();
+            if (e.X >= Width - ScaleLogical(18))
+            {
+                Step(e.Y < Height / 2 ? increment : -increment);
+            }
+            else
+            {
+                editor.Focus();
+                editor.SelectAll();
+            }
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (Enabled) Step(e.Delta > 0 ? increment : -increment);
+        }
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            base.OnEnabledChanged(e);
+            editor.Enabled = Enabled;
+            editor.BackColor = Enabled ? InputBackColor : Color.FromArgb(34, 34, 34);
+            editor.ForeColor = Enabled ? TextColor : Color.FromArgb(112, 112, 112);
+            Invalidate();
+        }
+
+        private void Editor_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode is not (Keys.Up or Keys.Down)) return;
+            Step(e.KeyCode == Keys.Up ? increment : -increment);
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+
+        private void Step(decimal amount) => Value = currentValue + amount;
+
+        private void ReadEditorValue()
+        {
+            if (updatingText || !decimal.TryParse(editor.Text, NumberStyles.Number,
+                    CultureInfo.CurrentCulture, out decimal parsed)) return;
+            decimal adjusted = Math.Clamp(decimal.Truncate(parsed), minimum, maximum);
+            if (adjusted == currentValue) return;
+            currentValue = adjusted;
+            ValueChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void UpdateEditorText()
+        {
+            string valueText = currentValue.ToString(CultureInfo.CurrentCulture);
+            if (editor.Text == valueText) return;
+            updatingText = true;
+            editor.Text = valueText;
+            editor.SelectionStart = editor.TextLength;
+            updatingText = false;
+        }
+
+        private int ScaleLogical(int value) => Math.Max(1, (int)Math.Round(value * DeviceDpi / 96f));
+    }
+    private sealed class DarkTrackBar : Control
+    {
+        private int minimum;
+        private int maximum = 10;
+        private int currentValue;
+        private bool dragging;
+
+        public DarkTrackBar()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw | ControlStyles.UserPaint | ControlStyles.Selectable, true);
+            TabStop = true;
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int Minimum
+        {
+            get => minimum;
+            set
+            {
+                minimum = value;
+                if (maximum < minimum) maximum = minimum;
+                Value = currentValue;
+                Invalidate();
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int Maximum
+        {
+            get => maximum;
+            set
+            {
+                maximum = Math.Max(value, minimum);
+                Value = currentValue;
+                Invalidate();
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int Value
+        {
+            get => currentValue;
+            set
+            {
+                int adjusted = Math.Clamp(value, minimum, maximum);
+                if (adjusted == currentValue) return;
+                currentValue = adjusted;
+                Invalidate();
+                ValueChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int TickFrequency { get; set; } = 1;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int SmallChange { get; set; } = 1;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int LargeChange { get; set; } = 5;
+        public event EventHandler? ValueChanged;
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor);
+            int left = ScaleLogical(8);
+            int right = Math.Max(left + 1, ClientSize.Width - ScaleLogical(9));
+            int centerY = ClientSize.Height / 2;
+            using Pen rail = new(Enabled ? Color.FromArgb(94, 94, 94) : Color.FromArgb(65, 65, 65), ScaleLogical(3));
+            e.Graphics.DrawLine(rail, left, centerY, right, centerY);
+
+            if (TickFrequency > 0 && maximum > minimum)
+            {
+                using Pen ticks = new(Color.FromArgb(82, 82, 82));
+                for (int tick = minimum; tick <= maximum; tick += TickFrequency)
+                {
+                    int x = ValueToX(tick, left, right);
+                    e.Graphics.DrawLine(ticks, x, centerY + ScaleLogical(6), x, centerY + ScaleLogical(8));
+                }
+            }
+
+            int thumbX = ValueToX(currentValue, left, right);
+            int radius = ScaleLogical(6);
+            using SolidBrush thumb = new(Enabled ? AccentGreen : Color.FromArgb(92, 92, 92));
+            using Pen thumbBorder = new(Enabled ? AccentColor : Color.FromArgb(120, 120, 120));
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.FillEllipse(thumb, thumbX - radius, centerY - radius, radius * 2, radius * 2);
+            e.Graphics.DrawEllipse(thumbBorder, thumbX - radius, centerY - radius, radius * 2, radius * 2);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (!Enabled || e.Button != MouseButtons.Left) return;
+            Focus();
+            dragging = true;
+            Capture = true;
+            SetValueFromMouse(e.X);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (dragging) SetValueFromMouse(e.X);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            dragging = false;
+            Capture = false;
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            int change = e.KeyCode switch
+            {
+                Keys.Left or Keys.Down => -SmallChange,
+                Keys.Right or Keys.Up => SmallChange,
+                Keys.PageDown => -LargeChange,
+                Keys.PageUp => LargeChange,
+                Keys.Home => minimum - currentValue,
+                Keys.End => maximum - currentValue,
+                _ => 0,
+            };
+            if (change == 0) return;
+            Value += change;
+            e.Handled = true;
+        }
+
+        private void SetValueFromMouse(int x)
+        {
+            int left = ScaleLogical(8);
+            int right = Math.Max(left + 1, ClientSize.Width - ScaleLogical(9));
+            double ratio = Math.Clamp((x - left) / (double)(right - left), 0d, 1d);
+            Value = minimum + (int)Math.Round(ratio * (maximum - minimum));
+        }
+
+        private int ValueToX(int value, int left, int right)
+        {
+            if (maximum == minimum) return left;
+            double ratio = (value - minimum) / (double)(maximum - minimum);
+            return left + (int)Math.Round(ratio * (right - left));
+        }
+
+        private int ScaleLogical(int value) => Math.Max(1, (int)Math.Round(value * DeviceDpi / 96f));
+    }
+    private sealed class DarkGroupBox : GroupBox
+    {
+        public DarkGroupBox()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor);
+            Rectangle border = new(0, 0, Math.Max(0, ClientSize.Width - 1), Math.Max(0, ClientSize.Height - 1));
+            using SolidBrush header = new(Color.FromArgb(39, 39, 39));
+            using Pen borderPen = new(Color.FromArgb(78, 78, 78));
+            e.Graphics.FillRectangle(header, 0, 0, ClientSize.Width, ScaleLogical(23));
+            e.Graphics.DrawRectangle(borderPen, border);
+            TextRenderer.DrawText(
+                e.Graphics,
+                Text,
+                Font,
+                new Rectangle(9, 2, Math.Max(0, ClientSize.Width - 18), ScaleLogical(19)),
+                ForeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+
+        private int ScaleLogical(int value)
+        {
+            return Math.Max(1, (int)Math.Round(value * DeviceDpi / 96f));
+        }
+    }
     private sealed class StatusCounters
     {
         public int Total { get; set; }

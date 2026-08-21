@@ -1,6 +1,38 @@
 SCO LIDEX Changelog
 ===================
 
+v1.400
+------
+- Corrected DEM handling for the ETRY Kentucky data case. Raster band scale and
+  offset plus metre, US survey-foot, and international-foot vertical units are
+  normalized to metres before interpolation. Declared NoData, invalid finite
+  sentinels, implausible elevations, and extreme four-cell discontinuities are
+  rejected so the established lower-resolution fallback fills missing posts
+  instead of encoding terrain spikes or walls. Added a focused regression probe.
+- Redesigned the main window as a TSRE-inspired dark operator console with
+  charcoal work surfaces, subtle grey card borders, amber section accents, a
+  restrained text-only LIDEX masthead, and a dark Windows title bar.
+- Consolidated Mode, Selection, and Build Options into a centered fixed sidebar.
+  Build Options now pair Route Tiles with HD Mesh Tiles and OSM / Map Tiles
+  with HD Map Tiles; DM Tiles remains the middle item in the left column.
+  Removed the disabled Mosaic Tiles placeholder and the unstable Text Size
+  feature.
+- Route selection, live status, Advanced Geo Bias, commands, and the framed
+  Running Log share one workspace. The 1024x700 minimum layout requires no
+  sidebar scrollbars; only the Running Log retains its vertical scrollbar.
+  Normal resizing remains available, maximizing is disabled, and startup bounds
+  stay inside the active monitor work area.
+- Refined the dark interface with an unclipped masthead, readable disabled
+  choices, dark custom sliders and numeric spinners, and matching dark cache-exit
+  and confirmation dialogs. Exit choices now distinguish the preferred Keep All
+  action from viable Purge and Cancel choices, the cache header fills cleanly, and
+  Running Log text uses a softer contrast. Enabled actions use a thin amber
+  outline; only the next workflow step is strong (Scan initially, then Run after
+  a passing scan). Post-scan focus follows Run, while active-operation focus
+  stays in the Running Log so Contact never receives default-button emphasis.
+  Tile Radius defaults to 2, the centered version label is slightly larger, and
+  Help and Contact use matching dark window treatment.
+
 v1.300
 ------
 - Added Options controls for HD terrain meshes and HD map images. Route, DM,
