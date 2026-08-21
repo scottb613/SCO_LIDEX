@@ -1,8 +1,7 @@
-// SCO LIDEX - Copernicus DEM GLO-30 global source
+// SCO LIDEX - Copernicus DEM GLO-30 discovery, validation, and COG reading.
 // Copyright (C) Scott Brunner, Beast of Burden
-//
-// Keeps the key-free global DEM naming, discovery, validation, and GDAL COG
-// reads separate from the established USGS terrain engine.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Collections.Generic;
@@ -101,9 +100,16 @@ internal static partial class Program
         List<string> failures)
     {
         List<DemWindow> windows = [];
+        bool firstProduct = true;
         foreach (CopernicusCogTile tile in GetCopernicusCogTiles(sampleGrid))
         {
             Dataset? dataset = null;
+            if (!firstProduct)
+            {
+                Console.WriteLine();
+            }
+            firstProduct = false;
+            WriteLogDetail("DEM product", $"{GlobalDemLabel} ({GlobalDemDisplayName}) | {tile.Name}.tif", 4);
             try
             {
                 dataset = Gdal.Open("/vsicurl/" + tile.Url, Access.GA_ReadOnly);
@@ -128,6 +134,7 @@ internal static partial class Program
                         dataset,
                         sampleGrid,
                         fillMissing: false,
+                        useStandardMetreElevations: true,
                         AddCopernicusDataBytes,
                         out short[,] heights,
                         out int missing,
@@ -141,9 +148,7 @@ internal static partial class Program
                     int totalSamples = heights.GetLength(0) * heights.GetLength(1);
                     int valid = totalSamples - missing;
                     windows.Add(new DemWindow(tile.Name + ".tif", heights, valid));
-                    Console.WriteLine(
-                        $"  -> {GlobalDemLabel} ({GlobalDemDisplayName}) can contribute " +
-                        $"{valid:N0} / {totalSamples:N0} samples: {tile.Name}.tif");
+                    WriteLogDetail("Contribution", $"{valid:N0} / {totalSamples:N0} samples", 6);
                 }
                 catch (Exception ex)
                 {

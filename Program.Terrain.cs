@@ -1,7 +1,7 @@
-// SCO LIDEX - Open Rails / MSTS Cloud Terrain Builder
+// SCO LIDEX - DEM acquisition, terrain generation, merging, and file encoding.
 // Copyright (C) Scott Brunner, Beast of Burden
-// DEM acquisition, normal terrain generation, merging, and terrain file encoding.
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Collections.Generic;
@@ -37,13 +37,14 @@ internal static partial class Program
         RouteLayout route,
         TerrainOutputResolution terrainResolution)
     {
-        Console.WriteLine($"Route: {route.RouteDir}");
-        Console.WriteLine($"Tiles: {route.TerrainTiles.Count}");
-        Console.WriteLine($"World files: {route.WorldTiles.Count}");
+        WriteLogSection("Route Summary");
+        WriteLogDetail("Route", route.RouteDir);
+        WriteLogDetail("Terrain tiles", $"{route.TerrainTiles.Count:N0}");
+        WriteLogDetail("World files", $"{route.WorldTiles.Count:N0}");
 
         if (route.StartTile is not null)
         {
-            Console.WriteLine($"RouteStart tile: X={route.StartTile.Value.X}, Z={route.StartTile.Value.Z}");
+            WriteLogDetail("RouteStart tile", $"X={route.StartTile.Value.X}, Z={route.StartTile.Value.Z}");
         }
 
         if (route.Markers.Count > 0)
@@ -53,30 +54,33 @@ internal static partial class Program
             double minLat = route.Markers.Min(m => m.Latitude);
             double maxLat = route.Markers.Max(m => m.Latitude);
 
-            Console.WriteLine($"Markers bbox: lon {minLon:F6}..{maxLon:F6}, lat {minLat:F6}..{maxLat:F6}");
+            WriteLogDetail("Marker bounds", $"lon {minLon:F6}..{maxLon:F6}, lat {minLat:F6}..{maxLat:F6}");
         }
 
         if (route.TsreProjection is not null)
         {
-            Console.WriteLine("Alternate projection detection: TsreGeoProjection found in .trk.");
+            WriteLogDetail("Projection tag", "TsreGeoProjection found in .trk");
         }
         else
         {
-            Console.WriteLine("Alternate projection detection: TsreGeoProjection not found; using standard route projection.");
+            WriteLogDetail("Projection tag", "TsreGeoProjection not found; using standard route projection");
         }
 
-        Console.WriteLine("\nImportant: this route uses external *_y.raw height grids.");
+        WriteLogSubsection("Terrain Storage");
+        WriteLogDetail("Height storage", "external *_y.raw height grids", 4);
         int gridSize = TerrainGridSize(terrainResolution);
-        Console.WriteLine(
-            $"Selected raw grid size is {gridSize}x{gridSize} int16 samples " +
-            $"for {TerrainOutputLabel(terrainResolution)}, not inline text heights.");
+        WriteLogDetail(
+            "Selected output",
+            $"{TerrainOutputLabel(terrainResolution)} | {gridSize}x{gridSize} int16 samples | not inline text heights",
+            4);
     }
 
     private static void PrintProjectionSummary(GeoTileMapper mapper)
     {
-        Console.WriteLine($"Estimated route DEM bbox: lon {mapper.MinLon:F6}..{mapper.MaxLon:F6}, lat {mapper.MinLat:F6}..{mapper.MaxLat:F6}");
-        Console.WriteLine($"Projection mode: {mapper.ProjectionName}");
-        Console.WriteLine(mapper.ProjectionDetail);
+        WriteLogSubsection("Geographic Projection");
+        WriteLogDetail("DEM bounds", $"lon {mapper.MinLon:F6}..{mapper.MaxLon:F6}, lat {mapper.MinLat:F6}..{mapper.MaxLat:F6}", 4);
+        WriteLogDetail("Mode", mapper.ProjectionName, 4);
+        WriteLogDetail("Details", mapper.ProjectionDetail, 4);
     }
 
     // Fill one ORTS 256-post terrain grid. The order is intentional:
@@ -108,7 +112,7 @@ internal static partial class Program
         int globalSamplesUsed = 0;
         if (missingAfterPrimary > 0 && sourcePolicy.UseIntermediate)
         {
-            Console.WriteLine($"  -> {PrimaryDemLabel} coverage left {missingAfterPrimary:N0} missing samples; trying {IntermediateDemLabel} fallback ({IntermediateDemDataset}).");
+            WriteLogDetail("Fallback", $"{missingAfterPrimary:N0} samples unresolved by {PrimaryDemLabel} | trying {IntermediateDemLabel} ({IntermediateDemDataset})");
             DemWindowSearchResult intermediateSearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, IntermediateDemDataset, failures);
             intermediateSamplesUsed = MergeWindows(intermediateSearch.Windows, mergedHeights);
             int missingAfterIntermediateSearch = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
@@ -118,7 +122,7 @@ internal static partial class Program
         int missingAfterIntermediate = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
         if (missingAfterIntermediate > 0 && sourcePolicy.UseFallback)
         {
-            Console.WriteLine($"  -> {IntermediateDemLabel} coverage left {missingAfterIntermediate:N0} missing samples; trying {FallbackDemLabel} fallback ({FallbackDemDataset}).");
+            WriteLogDetail("Fallback", $"{missingAfterIntermediate:N0} samples unresolved by {IntermediateDemLabel} | trying {FallbackDemLabel} ({FallbackDemDataset})");
             DemWindowSearchResult fallbackSearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, FallbackDemDataset, failures);
             fallbackSamplesUsed = MergeWindows(fallbackSearch.Windows, mergedHeights);
             int missingAfterFallbackSearch = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
@@ -128,9 +132,10 @@ internal static partial class Program
         int missingAfterFallback = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
         if (missingAfterFallback > 0 && sourcePolicy.UseGlobal)
         {
-            Console.WriteLine(
-                $"  -> {FallbackDemLabel} coverage left {missingAfterFallback:N0} missing samples; " +
-                $"trying {GlobalDemLabel} fallback ({GlobalDemDisplayName}, AWS Open Data, low resolution DSM).");
+            WriteLogDetail(
+                "Fallback",
+                $"{missingAfterFallback:N0} samples unresolved by {FallbackDemLabel} | trying {GlobalDemLabel} " +
+                $"({GlobalDemDisplayName}, AWS Open Data, low-resolution DSM)");
             globalSamplesUsed = MergeWindows(ReadCopernicusDemWindows(sampleGrid, failures), mergedHeights);
         }
 
@@ -142,7 +147,7 @@ internal static partial class Program
 
         if (missingBeforeFill > 0)
         {
-            Console.WriteLine($"  -> Mosaic still missing {missingBeforeFill:N0} samples after fallback; filling from neighbors.");
+            WriteLogDetail("Neighbor fill", $"{missingBeforeFill:N0} samples remained after all DEM tiers");
             FillMissingHeights(mergedHeights);
         }
 
@@ -212,7 +217,7 @@ internal static partial class Program
             if (items.GetArrayLength() == 0)
             {
                 failures.Add($"No {GetDemSourceDisplayName(datasetName)} product found for tile bbox lon {minLon:F6}..{maxLon:F6}, lat {minLat:F6}..{maxLat:F6}.");
-                Console.WriteLine($"  -> No {GetDemSourceDisplayName(datasetName)} coverage was returned for this tile; lower-resolution fallback is permitted.");
+                WriteLogDetail("No coverage", $"{GetDemSourceDisplayName(datasetName)} returned no product for this tile | lower-resolution fallback permitted");
                 return new DemWindowSearchResult([], SourceHiccup: false);
             }
 
@@ -297,7 +302,7 @@ internal static partial class Program
                 }
 
                 int delaySeconds = attempt * 3;
-                Console.WriteLine($"  -> USGS {GetDemSourceDisplayName(datasetName)} search attempt {attempt:N0}/{attempts:N0} failed: {ex.Message}; retrying in {delaySeconds:N0}s.");
+                WriteLogDetail("USGS retry", $"{GetDemSourceDisplayName(datasetName)} | attempt {attempt:N0}/{attempts:N0} failed | retry in {delaySeconds:N0}s | {ex.Message}");
                 await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
             }
         }
@@ -332,10 +337,17 @@ internal static partial class Program
         List<string> failures)
     {
         List<DemWindow> windows = [];
+        bool firstProduct = true;
         foreach (string url in urls)
         {
             Dataset? ds = null;
             string productName = Path.GetFileName(new Uri(url).LocalPath);
+            if (!firstProduct)
+            {
+                Console.WriteLine();
+            }
+            firstProduct = false;
+            WriteLogDetail("DEM product", $"{GetDemSourceDisplayName(datasetName)} | {productName}", 4);
             try
             {
                 ds = Gdal.Open("/vsicurl/" + url, Access.GA_ReadOnly);
@@ -367,7 +379,19 @@ internal static partial class Program
                     // GDAL streams these remote files through /vsicurl/. SCO LIDEX
                     // reads only the raster window needed for the current terrain
                     // grid and records that requested window size in the run total.
-                    readOk = TryReadDatasetSampleGrid(ds, sampleGrid, fillMissing: false, AddUsgsDataBytes, out heights, out missing, out failure);
+                    bool useStandardMetreElevations = !string.Equals(
+                        datasetName,
+                        IntermediateDemDataset,
+                        StringComparison.OrdinalIgnoreCase);
+                    readOk = TryReadDatasetSampleGrid(
+                        ds,
+                        sampleGrid,
+                        fillMissing: false,
+                        useStandardMetreElevations,
+                        AddUsgsDataBytes,
+                        out heights,
+                        out missing,
+                        out failure);
                 }
                 catch (Exception ex)
                 {
@@ -380,15 +404,13 @@ internal static partial class Program
                     int totalSamples = heights.GetLength(0) * heights.GetLength(1);
                     int valid = totalSamples - missing;
                     windows.Add(new DemWindow(productName, heights, valid));
-                    Console.WriteLine($"  -> {GetDemSourceDisplayName(datasetName)} can contribute {valid:N0} / {totalSamples:N0} samples: {productName}");
+                    WriteLogDetail("Contribution", $"{valid:N0} / {totalSamples:N0} samples", 6);
                     continue;
                 }
 
                 if (IsDemCoverageGapFailure(failure))
                 {
-                    Console.WriteLine(
-                        $"  -> {GetDemSourceDisplayName(datasetName)} has no usable samples " +
-                        $"in this part of {productName}; lower-resolution fallback remains available.");
+                    WriteLogDetail("Coverage", "no usable samples in this product window; lower-resolution fallback remains available", 6);
                     continue;
                 }
 
@@ -537,7 +559,7 @@ internal static partial class Program
         {
             int used = MergeDemWindow(mergedHeights, window.Heights);
             totalUsed += used;
-            Console.WriteLine($"  -> Mosaic used {used:N0} samples from {window.ProductName}");
+            WriteLogDetail("Mosaic use", $"{used:N0} samples | {window.ProductName}", 4);
             if (!mergedHeights.Cast<short>().Any(v => v == RawMissingHeight))
             {
                 break;
@@ -563,6 +585,7 @@ internal static partial class Program
         Dataset ds,
         GeoSampleGrid sampleGrid,
         bool fillMissing,
+        bool useStandardMetreElevations,
         Action<long> addDataBytes,
         out short[,] heights,
         out int missing,
@@ -633,12 +656,16 @@ internal static partial class Program
 
         double? noData = TryGetNoDataValue(elevationBand);
         RasterElevationTransform elevationTransform =
-            GetRasterElevationTransform(ds, elevationBand);
+            GetRasterElevationTransform(
+                ds,
+                elevationBand,
+                useStandardMetreElevations);
         if (Math.Abs(elevationTransform.UnitToMeters - 1.0) > 0.0000001)
         {
-            Console.WriteLine(
-                $"  -> DEM vertical units: {elevationTransform.UnitName}; " +
-                $"converting source elevations to metres.");
+            WriteLogDetail(
+                "Vertical units",
+                $"{elevationTransform.UnitName} | converting source elevations to metres",
+                6);
         }
 
         for (int y = 0; y < gridHeight; y++)
@@ -677,22 +704,25 @@ internal static partial class Program
 
     private static RasterElevationTransform GetRasterElevationTransform(
         Dataset ds,
-        Band elevationBand)
+        Band elevationBand,
+        bool useStandardMetreElevations)
     {
         elevationBand.GetScale(out double bandScale, out int hasScale);
         elevationBand.GetOffset(out double bandOffset, out int hasOffset);
         bandScale = hasScale == 0 ? 1.0 : bandScale;
         bandOffset = hasOffset == 0 ? 0.0 : bandOffset;
 
-        string unitName = elevationBand.GetUnitType()?.Trim() ?? "";
-        double unitToMeters = TryGetUnitScaleToMeters(unitName, out double bandUnitScale)
-            ? bandUnitScale
-            : 1.0;
+        string bandUnitName = elevationBand.GetUnitType()?.Trim() ?? "";
+        string projectedUnitName = "";
+        double projectedUnitToMeters = 1.0;
 
-        // USGS OPR products commonly omit the raster-band unit while retaining
-        // their original projected CRS. In that case the elevation samples use
-        // the CRS linear unit too (for example Tennessee State Plane ftUS).
-        if (string.IsNullOrWhiteSpace(unitName))
+        // A projected CRS describes horizontal coordinates, not elevation.
+        // Only Original Product Resolution DEMs may declare non-metre values
+        // or use their projected unit as a last-resort elevation hint. Standard
+        // USGS 1 m and 10 m DEM elevation values are metres even when GDAL
+        // exposes a misleading feet label through the CRS or raster band.
+        if (!useStandardMetreElevations &&
+            string.IsNullOrWhiteSpace(bandUnitName))
         {
             string projection = ds.GetProjection();
             if (!string.IsNullOrWhiteSpace(projection))
@@ -706,23 +736,60 @@ internal static partial class Program
                     if (double.IsFinite(crsUnitToMeters) &&
                         crsUnitToMeters > 0)
                     {
-                        unitName = crsUnitName;
-                        unitToMeters = crsUnitToMeters;
+                        projectedUnitName = crsUnitName;
+                        projectedUnitToMeters = crsUnitToMeters;
                     }
                 }
             }
         }
 
-        if (string.IsNullOrWhiteSpace(unitName))
-        {
-            unitName = "metres (assumed)";
-        }
+        RasterElevationUnit elevationUnit = ResolveRasterElevationUnit(
+            bandUnitName,
+            projectedUnitName,
+            projectedUnitToMeters,
+            useStandardMetreElevations);
 
         return new RasterElevationTransform(
-            bandScale * unitToMeters,
-            bandOffset * unitToMeters,
-            unitToMeters,
-            unitName);
+            bandScale * elevationUnit.UnitToMeters,
+            bandOffset * elevationUnit.UnitToMeters,
+            elevationUnit.UnitToMeters,
+            elevationUnit.UnitName);
+    }
+
+    private static RasterElevationUnit ResolveRasterElevationUnit(
+        string bandUnitName,
+        string projectedUnitName,
+        double projectedUnitToMeters,
+        bool useStandardMetreElevations)
+    {
+        if (useStandardMetreElevations)
+        {
+            return new RasterElevationUnit(1.0, "metres (standard DEM)");
+        }
+
+        string normalizedBandUnit = bandUnitName.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedBandUnit))
+        {
+            double bandUnitToMeters = TryGetUnitScaleToMeters(
+                normalizedBandUnit,
+                out double recognizedBandUnitScale)
+                    ? recognizedBandUnitScale
+                    : 1.0;
+            return new RasterElevationUnit(
+                bandUnitToMeters,
+                normalizedBandUnit);
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectedUnitName) &&
+            double.IsFinite(projectedUnitToMeters) &&
+            projectedUnitToMeters > 0)
+        {
+            return new RasterElevationUnit(
+                projectedUnitToMeters,
+                projectedUnitName.Trim());
+        }
+
+        return new RasterElevationUnit(1.0, "metres (assumed)");
     }
 
     private static bool TryGetUnitScaleToMeters(
@@ -1945,6 +2012,10 @@ internal static partial class Program
     private sealed record RasterElevationTransform(
         double ValueScale,
         double ValueOffset,
+        double UnitToMeters,
+        string UnitName);
+
+    private sealed record RasterElevationUnit(
         double UnitToMeters,
         string UnitName);
 

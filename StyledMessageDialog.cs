@@ -1,6 +1,7 @@
-// SCO LIDEX - application-styled replacement for native Windows message boxes.
+// SCO LIDEX - themed replacement for native Windows message boxes.
 // Copyright (C) Scott Brunner, Beast of Burden
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Drawing;

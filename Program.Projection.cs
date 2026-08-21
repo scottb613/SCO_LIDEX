@@ -1,7 +1,7 @@
-// SCO LIDEX - Open Rails / MSTS Cloud Terrain Builder
+// SCO LIDEX - route discovery and MSTS/Open Rails/TSRE coordinate projection.
 // Copyright (C) Scott Brunner, Beast of Burden
-// Route discovery, tile geography, and MSTS/Open Rails/TSRE coordinate projection.
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Collections.Generic;

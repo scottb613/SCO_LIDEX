@@ -1,5 +1,7 @@
-// SCO LIDEX - Geofabrik/OpenStreetMap terrain-map generation for TSRE/Open Rails.
-// This implementation is self-contained and follows TSRE's ACE image layout.
+// SCO LIDEX - Geofabrik/OpenStreetMap terrain-map and PolyVeg source processing.
+// Copyright (C) Scott Brunner, Beast of Burden
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -24,6 +26,9 @@ internal static partial class Program
     private static int MapImageSize = 2048;
     private const int MapTileParallelism = 2;
     private const double TreeRowWidthMetres = 10.0;
+    private const int NaturalWoodRed = 141;
+    private const int NaturalWoodGreen = 196;
+    private const int NaturalWoodBlue = 108;
     private const string GeofabrikIndexUrl = "https://download.geofabrik.de/index-v1.json";
     // Relation-safe route cut written during the first regional PBF scan. Maps
     // and PolyVeg reuse this compact, spatially indexed source until either the
@@ -995,23 +1000,17 @@ internal static partial class Program
 
     private static void WriteOsmLogSection(string title)
     {
-        string heading = title.Trim().ToUpperInvariant();
-        Console.WriteLine();
-        Console.WriteLine(heading);
-        Console.WriteLine(new string('-', heading.Length));
+        WriteLogSection(title);
     }
 
     private static void WriteOsmLogSubsection(string title)
     {
-        string heading = title.Trim().ToUpperInvariant();
-        Console.WriteLine();
-        Console.WriteLine($"  {heading}");
-        Console.WriteLine($"  {new string('-', heading.Length)}");
+        WriteLogSubsection(title);
     }
 
     private static void WriteOsmLogBullet(string message)
     {
-        Console.WriteLine($"  • {message}");
+        WriteLogBullet(message);
     }
 
     private static void WriteOsmLogEntry(string message, int indent = 2)
@@ -1677,7 +1676,7 @@ internal static partial class Program
         if (natural == "tree_row")
         {
             float widthPixels = (float)(TreeRowWidthMetres * MapImageSize / OrtsTileSizeMeters);
-            return LineStyle(133, 193, 133, widthPixels, TsreDrawOrder(6));
+            return LineStyle(NaturalWoodRed, NaturalWoodGreen, NaturalWoodBlue, widthPixels, TsreDrawOrder(6));
         }
         PolyVegClassification? polyVeg = GetPolyVegClassification(feature);
         if (polyVeg is not null)
@@ -1740,7 +1739,8 @@ internal static partial class Program
         string landuse = GetOgrField(feature, "landuse").Trim().ToLowerInvariant();
         string leisure = GetOgrField(feature, "leisure").Trim().ToLowerInvariant();
         string tourism = GetOgrField(feature, "tourism").Trim().ToLowerInvariant();
-        if (natural == "wood") return new("woodland", "natural=wood", TsreDrawOrder(7), 141, 196, 108);
+        if (natural == "wood") return new(
+            "woodland", "natural=wood", TsreDrawOrder(7), NaturalWoodRed, NaturalWoodGreen, NaturalWoodBlue);
         if (landuse is "forest" or "wood") return new("woodland", $"landuse={landuse}", TsreDrawOrder(7), 133, 193, 133);
         if (natural == "scrub") return new("scrub", "natural=scrub", TsreDrawOrder(7), 181, 226, 181);
         if (natural == "wetland") return new("wetland", "natural=wetland", TsreDrawOrder(7), 95, 180, 160);

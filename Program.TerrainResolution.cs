@@ -1,5 +1,7 @@
-// SCO LIDEX - normal terrain resolution inspection and guarded conversion.
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// SCO LIDEX - terrain-resolution inspection and guarded route-wide conversion.
+// Copyright (C) Scott Brunner, Beast of Burden
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Collections.Generic;

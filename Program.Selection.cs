@@ -1,7 +1,7 @@
-// SCO LIDEX - Open Rails / MSTS Cloud Terrain Builder
+// SCO LIDEX - route, marker, KML, text-file, and track-database selection.
 // Copyright (C) Scott Brunner, Beast of Burden
-// Route, marker, KML, text-file, and track-database terrain selection.
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Collections.Generic;

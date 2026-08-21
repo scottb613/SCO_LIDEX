@@ -1,9 +1,7 @@
-// SCO LIDEX - WinForms Front End
+// SCO LIDEX - WinForms interface, workflow orchestration, and operator logging.
 // Copyright (C) Scott Brunner, Beast of Burden
-//
-// This file contains the desktop interface, run/scan orchestration, live
-// status counters, logging, help/contact viewers, and post-processing controls.
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.ComponentModel;
@@ -1735,6 +1733,14 @@ internal sealed partial class TopoForm : Form
             string[] args = BuildRunArguments(routePath);
             await Task.Run(() => Program.RunConsoleAsync(args, runCancellation.Token));
         }
+        catch (OperationCanceledException)
+        {
+            SetOperationMessage("OPERATION ABORTED");
+            AppendLog(
+                $"{Environment.NewLine}OPERATION ABORTED{Environment.NewLine}" +
+                $"-----------------{Environment.NewLine}" +
+                $"  RESULT: STOPPED SAFELY at the next available operation boundary.{Environment.NewLine}");
+        }
         catch (Exception ex)
         {
             SetOperationMessage("OPERATION FAILED");
@@ -1744,9 +1750,11 @@ internal sealed partial class TopoForm : Form
         {
             runTimer.Stop();
             AppendLog(
-                $"{Environment.NewLine}Elapsed time: {FormatElapsed(runTimer.Elapsed)}{Environment.NewLine}" +
-                $"USGS data read: {Program.FormatUsgsDataBytesRead()}{Environment.NewLine}");
-            AppendLog($"Copernicus data read: {Program.FormatCopernicusDataBytesRead()}{Environment.NewLine}");
+                $"{Environment.NewLine}RUN TOTALS{Environment.NewLine}" +
+                $"----------{Environment.NewLine}" +
+                $"  ELAPSED: {FormatElapsed(runTimer.Elapsed)}{Environment.NewLine}" +
+                $"  USGS DATA READ: {Program.FormatUsgsDataBytesRead()}{Environment.NewLine}" +
+                $"  COPERNICUS DATA READ: {Program.FormatCopernicusDataBytesRead()}{Environment.NewLine}");
             Console.SetOut(previousOut);
             Console.SetError(previousError);
             logFileWriter?.Dispose();
@@ -2160,28 +2168,42 @@ internal sealed partial class TopoForm : Form
 
     private void WriteRunSettingsHeader(string routePath, string operation)
     {
-        string settings =
-            $"Version: {versionLabel.Text}{Environment.NewLine}" +
-            $"Operation: {operation}{Environment.NewLine}" +
-            $"Route: {routePath}{Environment.NewLine}" +
-            $"Mode: {(overwriteMode.Checked ? "Overwrite" : "Append")}{Environment.NewLine}" +
-            $"Create Route Tiles: {YesNo(createRouteTiles.Checked)}{Environment.NewLine}" +
-            $"Create Distant Mountains: {YesNo(distantMountains.Checked)}{Environment.NewLine}" +
-            $"Create OSM/Map Tiles: {YesNo(createMapTiles.Checked)}{Environment.NewLine}" +
-            $"Enable HD Map Tiles: {YesNo(enableHdMapTiles.Checked)}{Environment.NewLine}" +
-            $"Enable HD Mesh Tiles: {YesNo(enableHd4mTiles.Checked)}{Environment.NewLine}" +
-            $"Terrain Output: {(experimentalOutput.Checked ? "HD Test - 4m Tiles" : "Normal - 8m Tiles")}{Environment.NewLine}" +
-            $"Global DEM fallback: 30m (global) - Copernicus DEM GLO-30 Public, anonymous AWS Open Data, low resolution DSM{Environment.NewLine}" +
-            $"Clean Tile Wipe: {YesNo(cleanTileTemplate.Checked)}{Environment.NewLine}" +
-            $"Scan Override: {YesNo(scanOverride.Checked)}{Environment.NewLine}" +
-            $"Selection: {GetSelectionText()}{Environment.NewLine}" +
-            $"Tile Radius: {(int)terrainRadius.Value}{Environment.NewLine}" +
-            $"DM Radius: {(int)loTileRadius.Value}{Environment.NewLine}" +
-            $"Advanced Geo Bias N/S: {(int)postNorthSouthShiftValue.Value} m{Environment.NewLine}" +
-            $"Advanced Geo Bias E/W: {(int)postEastWestShiftValue.Value} m{Environment.NewLine}" +
-            $"Log Path: {Path.Combine(GetUserFacingLogDirectory(), "SCOLIDEX.log")}{Environment.NewLine}" +
-            Environment.NewLine;
-        AppendLog(settings);
+        StringBuilder settings = new();
+        string title = $"{operation.ToUpperInvariant()} SETTINGS";
+        settings.AppendLine(title);
+        settings.AppendLine(new string('-', title.Length));
+        settings.AppendLine($"  OPERATION: {operation}");
+        settings.AppendLine($"  ROUTE: {routePath}");
+        settings.AppendLine($"  VERSION: {versionLabel.Text}");
+        settings.AppendLine($"  MODE: {(overwriteMode.Checked ? "Overwrite" : "Append")}");
+        settings.AppendLine($"  TERRAIN OUTPUT: {(experimentalOutput.Checked ? "HD Test - 4m Tiles" : "Normal - 8m Tiles")}");
+        settings.AppendLine($"  SELECTION: {GetSelectionText()}");
+        settings.AppendLine();
+        settings.AppendLine("  OUTPUTS");
+        settings.AppendLine("  -------");
+        settings.AppendLine($"    • Route Tiles: {YesNo(createRouteTiles.Checked)}");
+        settings.AppendLine($"    • Distant Mountains: {YesNo(distantMountains.Checked)}");
+        settings.AppendLine($"    • OSM / Map Tiles: {YesNo(createMapTiles.Checked)}");
+        settings.AppendLine($"    • HD Map Tiles: {YesNo(enableHdMapTiles.Checked)}");
+        settings.AppendLine($"    • HD Mesh Tiles: {YesNo(enableHd4mTiles.Checked)}");
+        settings.AppendLine();
+        settings.AppendLine("  OPTIONS");
+        settings.AppendLine("  -------");
+        settings.AppendLine($"    • Tile Radius: {(int)terrainRadius.Value}");
+        settings.AppendLine($"    • DM Radius: {(int)loTileRadius.Value}");
+        settings.AppendLine($"    • Clean Tile Wipe: {YesNo(cleanTileTemplate.Checked)}");
+        settings.AppendLine($"    • Scan Override: {YesNo(scanOverride.Checked)}");
+        settings.AppendLine($"    • Geo Bias N/S: {(int)postNorthSouthShiftValue.Value} m");
+        settings.AppendLine($"    • Geo Bias E/W: {(int)postEastWestShiftValue.Value} m");
+        settings.AppendLine();
+        settings.AppendLine("  DATA SOURCES");
+        settings.AppendLine("  ------------");
+        settings.AppendLine("    • USGS: 1m, 5m~, and 10m DEM tiers as enabled by Scan");
+        settings.AppendLine("    • Global fallback: 30m Copernicus DEM GLO-30 Public | anonymous AWS Open Data | low-resolution DSM");
+        settings.AppendLine();
+        settings.AppendLine($"  LOG: {Path.Combine(GetUserFacingLogDirectory(), "SCOLIDEX.log")}");
+        settings.AppendLine();
+        AppendLog(settings.ToString());
     }
 
     private string GetSelectionText()
@@ -2232,7 +2254,7 @@ internal sealed partial class TopoForm : Form
         if (runCancellation is not null)
         {
             runCancellation.Cancel();
-            AppendLog($"{Environment.NewLine}Abort requested. Processing will stop before the next tile/write step.{Environment.NewLine}");
+            SetOperationMessage("ABORT REQUESTED");
             return;
         }
 
@@ -2453,11 +2475,23 @@ internal sealed partial class TopoForm : Form
             return;
         }
 
+        if (IsInternalStatusControlText(text))
+        {
+            TrackStatusText(text);
+            return;
+        }
+
         logText.AppendText(text);
         logFileWriter?.Write(text);
         logFileWriter?.Flush();
         TrackStatusText(text);
     }
+
+    private static bool IsInternalStatusControlText(string text) =>
+        text.Trim().StartsWith("STATUS:", StringComparison.Ordinal);
+
+    internal static bool HidesInternalStatusControlTextForProbe(string text) =>
+        IsInternalStatusControlText(text);
 
     private static StreamWriter? OpenLogFile()
     {
@@ -3473,7 +3507,7 @@ internal sealed partial class TopoForm : Form
     [GeneratedRegex(@"^\[(?:4m\s+)?(?<index>[\d,]+)/(?<total>[\d,]+)\]", RegexOptions.IgnoreCase)]
     private static partial Regex RouteTileRegex();
 
-    [GeneratedRegex(@"Progress:\s+(?<processed>[\d,]+)/(?<total>[\d,]+)\s+processed.*?(?<generated>[\d,]+)\s+generated,\s+(?<skipped>[\d,]+)\s+skipped,\s+(?<failed>[\d,]+)\s+failed", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"Progress:\s+(?<processed>[\d,]+)/(?<total>[\d,]+)\s+processed.*?(?<generated>[\d,]+)\s+generated.*?(?<skipped>[\d,]+)\s+skipped.*?(?<failed>[\d,]+)\s+failed", RegexOptions.IgnoreCase)]
     private static partial Regex RouteProgressRegex();
 
     [GeneratedRegex(@"Done\.\s+Generated=(?<generated>[\d,]+),\s+skipped=(?<skipped>[\d,]+),\s+failed=(?<failed>[\d,]+),\s+total=(?<total>[\d,]+)", RegexOptions.IgnoreCase)]

@@ -1,5 +1,7 @@
-// SCO LIDEX - Open Rails / MSTS Cloud Terrain Builder
-// Focused regression checks for DEM coverage classification and vertical units.
+// SCO LIDEX - DEM coverage, fallback, and vertical-unit regression probe.
+// Copyright (C) Scott Brunner, Beast of Burden
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 
@@ -31,6 +33,40 @@ internal static partial class Program
         {
             throw new InvalidOperationException(
                 "DEM fallback probe failed international foot conversion.");
+        }
+
+        RasterElevationUnit standardOneMetreUnit = ResolveRasterElevationUnit(
+            bandUnitName: "US survey foot",
+            projectedUnitName: "US survey foot",
+            projectedUnitToMeters: usSurveyFootToMeters,
+            useStandardMetreElevations: true);
+        if (Math.Abs(standardOneMetreUnit.UnitToMeters - 1.0) > 1e-12 ||
+            standardOneMetreUnit.UnitName != "metres (standard DEM)")
+        {
+            throw new InvalidOperationException(
+                "DEM fallback probe treated a standard 1m DEM's horizontal CRS unit as its elevation unit.");
+        }
+
+        RasterElevationUnit originalProductUnit = ResolveRasterElevationUnit(
+            bandUnitName: "",
+            projectedUnitName: "US survey foot",
+            projectedUnitToMeters: usSurveyFootToMeters,
+            useStandardMetreElevations: false);
+        if (Math.Abs(originalProductUnit.UnitToMeters - usSurveyFootToMeters) > 1e-12)
+        {
+            throw new InvalidOperationException(
+                "DEM fallback probe failed the Original Product Resolution CRS-unit fallback.");
+        }
+
+        RasterElevationUnit explicitBandUnit = ResolveRasterElevationUnit(
+            bandUnitName: "US survey foot",
+            projectedUnitName: "metre",
+            projectedUnitToMeters: 1.0,
+            useStandardMetreElevations: false);
+        if (Math.Abs(explicitBandUnit.UnitToMeters - usSurveyFootToMeters) > 1e-12)
+        {
+            throw new InvalidOperationException(
+                "DEM fallback probe ignored an explicit raster-band elevation unit.");
         }
 
         RasterElevationTransform feetTransform = new(

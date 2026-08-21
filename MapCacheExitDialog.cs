@@ -1,6 +1,7 @@
-// SCO LIDEX - selectable cache choices shown whenever the GUI exits.
+// SCO LIDEX - exit-time map-cache selection and purge dialog.
 // Copyright (C) Scott Brunner, Beast of Burden
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Collections.Generic;

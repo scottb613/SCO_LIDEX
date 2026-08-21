@@ -1,5 +1,7 @@
-// SCO LIDEX - production HD Test 4 m normal-terrain writer.
-// Uses the same bounded rolling-row architecture as normal 8 m terrain.
+// SCO LIDEX - HD Test 4m terrain generation and bounded rolling-row writing.
+// Copyright (C) Scott Brunner, Beast of Burden
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Collections.Generic;
@@ -48,26 +50,29 @@ internal static partial class Program
             return false;
         }
 
-        Console.WriteLine();
-        Console.WriteLine("=========================================");
-        Console.WriteLine(" HD TEST - 4m TILES ");
-        Console.WriteLine("=========================================");
-        Console.WriteLine($"Selected normal terrain tiles: {tiles.Count:N0}");
-        Console.WriteLine("Height grid: 512x512, 4m posts, 524,288-byte _y.raw");
-        Console.WriteLine("Write policy: merge and write completed terrain rows continuously; retain only the active seam window.");
+        WriteLogSection("HD Test - 4m Terrain Generation");
+        WriteLogDetail("Selected tiles", $"{tiles.Count:N0}");
+        WriteLogDetail("Mode", overwriteFlag ? "OVERWRITE" : "APPEND");
+        WriteLogDetail("Height grid", "512x512 | 4m posts | 524,288-byte _y.raw");
+        WriteLogDetail("Write policy", "continuous completed-row writes | bounded active seam window");
 
         RollingExperimentalTerrainWriter rollingWriter = new(outputDir);
         int generatedCount = 0;
         int skipped = 0;
         int failed = 0;
+        bool aborted = false;
         SortedSet<string> retryableFailedTileNames = new(StringComparer.OrdinalIgnoreCase);
         for (int index = 0; index < tiles.Count; index++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                aborted = true;
+                break;
+            }
             TerrainTile tile = tiles[index];
             WorldTile worldTile = tile.WorldTile!;
             int tileNumber = index + 1;
-            Console.WriteLine($"\n[4m {tileNumber:N0}/{tiles.Count:N0}] {tile.TileFile.Name} ({tiles.Count - tileNumber:N0} remaining)");
+            Console.WriteLine($"\n[4m {tileNumber:N0}/{tiles.Count:N0}] TILE: {tile.TileFile.Name} | {tiles.Count - tileNumber:N0} remaining");
             rollingWriter.FlushRowsBefore(worldTile.Z - 1);
             NormalizeTerrainMaterialFileIfLegacyMap(tile);
 
@@ -76,7 +81,7 @@ internal static partial class Program
             if (!overwriteFlag && existingStats is not null && !existingStats.IsEmpty)
             {
                 skipped++;
-                Console.WriteLine($"  -> Skipped: 4m raw grid already has {existingStats.ValidCount:N0} height samples.");
+                WriteLogDetail("Skipped", $"4m raw grid already has {existingStats.ValidCount:N0} valid height samples");
                 PrintProgressCheckpoint(tileNumber, tiles.Count, generatedCount, skipped, failed);
                 continue;
             }
@@ -95,8 +100,8 @@ internal static partial class Program
                     : "STATUS: TILES - US - HIGH RES");
                 rollingWriter.Add(new ExperimentalGeneratedTile(tile, result.Heights));
                 generatedCount++;
-                Console.WriteLine(
-                    $"  -> Source samples used: " +
+                WriteLogDetail(
+                    "Source samples used",
                     $"{PrimaryDemLabel}={result.PrimarySamplesUsed:N0}, " +
                     $"{IntermediateDemLabel}={result.IntermediateSamplesUsed:N0}, " +
                     $"{FallbackDemLabel}={result.FallbackSamplesUsed:N0}, " +
@@ -108,7 +113,7 @@ internal static partial class Program
                 failed++;
                 retryableFailedTileNames.Add(GetTerrainTileBaseName(tile));
                 MarkTerrainTileForAppendRetry(tile, ExperimentalRawGridSize);
-                Console.WriteLine($"  -> HD Test 4m generation failed: {ex.Message}");
+                WriteLogDetail("HD Test 4m generation failed", ex.Message);
             }
 
             PrintProgressCheckpoint(tileNumber, tiles.Count, generatedCount, skipped, failed);
@@ -124,14 +129,13 @@ internal static partial class Program
             return false;
         }
 
+        WriteLogSubsection("HD Terrain Output");
+        WriteLogDetail("Peak memory window", $"{rollingWriter.PeakPendingCount:N0} tile grid(s)", 4);
         Console.WriteLine(
-            $"HD Test rolling writer peak memory window: " +
-            $"{rollingWriter.PeakPendingCount:N0} tile grid(s).");
-        Console.WriteLine(
-            $"\nDone. Generated={generatedCount:N0}, skipped={skipped:N0}, " +
+            $"\n  HD TERRAIN DONE. Generated={generatedCount:N0}, skipped={skipped:N0}, " +
             $"failed={failed:N0}, total={tiles.Count:N0}.");
         PrintFailedTileTextFileBlock(retryableFailedTileNames);
-        return failed == 0;
+        return !aborted && failed == 0;
     }
 
     private static void WriteExperimental4mTile(

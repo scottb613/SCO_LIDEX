@@ -1,7 +1,7 @@
-// SCO LIDEX - Open Rails / MSTS Cloud Terrain Builder
+// SCO LIDEX - Distant Mountain coverage, generation, and low-terrain handling.
 // Copyright (C) Scott Brunner, Beast of Burden
-// Distant-mountain coverage, generation, and low-terrain file handling.
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Collections.Generic;
@@ -105,8 +105,9 @@ internal static partial class Program
                     : useTextFileCoverage
                         ? "text file"
             : $"{route.TerrainTiles.Count:N0} route tiles";
-        Console.WriteLine($"\nDistant Mountains: {coverageDescription}, radius {loTileRadius:N0}, {total:N0} lo_tiles.");
-        Console.WriteLine($"Distant Mountains DEM: {GlobalDemDisplayName} only; 30m source resampled to the 128m low-terrain grid.");
+        WriteLogSection("Distant Mountain Generation");
+        Console.WriteLine($"  Distant Mountains: {coverageDescription}, radius {loTileRadius:N0}, {total:N0} lo_tiles.");
+        WriteLogDetail("DEM source", $"{GlobalDemDisplayName} only | 30m source resampled to the 128m low-terrain grid");
         Console.WriteLine("STATUS: DM - PROCESSING");
         if (sampleOffsetX != 0 || sampleOffsetY != 0)
         {
@@ -126,7 +127,7 @@ internal static partial class Program
             string loName = LoTileNameFromTileXZ(loTile.X, loTile.Z);
             string tilePath = Path.Combine(outputDir, loName + ".t");
             string heightPath = Path.Combine(outputDir, loName + "_y.raw");
-            Console.WriteLine($"\n[DM {index:N0}/{total:N0}] {loName}.t");
+            Console.WriteLine($"\n[DM {index:N0}/{total:N0}] TILE: {loName}.t");
             rollingWriter.FlushRowsBefore(DistantMountainGridKey(loTile).Z - 1);
 
             EnsureExactFileNameCasing(tilePath);
@@ -135,14 +136,14 @@ internal static partial class Program
             RawGridStats? existingLoStats = TryGetRawGridStats(heightPath);
             if (!overwriteFlag && File.Exists(tilePath) && existingLoStats is not null && !existingLoStats.IsEmpty)
             {
-                Console.WriteLine($"  -> Skipped: lo_tile raw grid already has {existingLoStats.ValidCount:N0} height samples.");
+                WriteLogDetail("Skipped", $"lo_tile raw grid already has {existingLoStats.ValidCount:N0} valid height samples");
                 skipped++;
                 continue;
             }
 
             if (!overwriteFlag && File.Exists(tilePath) && existingLoStats is not null && existingLoStats.IsEmpty)
             {
-                Console.WriteLine("  -> Existing lo_tile raw grid is empty; retrying DEM generation.");
+                WriteLogDetail("Retry", "existing lo_tile raw grid is empty; requesting DEM data");
             }
 
             try
@@ -157,8 +158,9 @@ internal static partial class Program
                     sampleOffsetY,
                     sourceBiasEastMeters,
                     sourceBiasNorthMeters);
-                Console.WriteLine(
-                    $"  -> Estimated bbox lon {sampleGrid.BoundingBox.MinLon:F6}..{sampleGrid.BoundingBox.MaxLon:F6}, " +
+                WriteLogDetail(
+                    "DEM bounds",
+                    $"lon {sampleGrid.BoundingBox.MinLon:F6}..{sampleGrid.BoundingBox.MaxLon:F6} | " +
                     $"lat {sampleGrid.BoundingBox.MinLat:F6}..{sampleGrid.BoundingBox.MaxLat:F6}");
 
                 List<string> failures = [];
@@ -173,7 +175,7 @@ internal static partial class Program
                 int missingBeforeFill = heights.Cast<short>().Count(h => h == RawMissingHeight);
                 if (missingBeforeFill > 0)
                 {
-                    Console.WriteLine($"  -> Copernicus DEM mosaic still missing {missingBeforeFill:N0} samples; filling from neighbors.");
+                    WriteLogDetail("Neighbor fill", $"{missingBeforeFill:N0} samples remained after Copernicus mosaic");
                     FillMissingHeights(heights);
                 }
 
@@ -182,13 +184,13 @@ internal static partial class Program
                     loTile, loName, templateTile, tilePath, heightPath,
                     heights, 0, globalSamplesUsed));
                 built++;
-                Console.WriteLine($"  -> Prepared TSRE-style lo_tile with {GlobalDemLabel}={globalSamplesUsed:N0}, neighbor-fill={missingBeforeFill:N0} samples.");
+                Console.WriteLine($"  PREPARED TSRE-style lo_tile with {GlobalDemLabel}={globalSamplesUsed:N0}, neighbor-fill={missingBeforeFill:N0} samples.");
             }
             catch (Exception ex)
             {
                 failed++;
                 MarkDistantMountainTileForAppendRetry(tilePath, heightPath);
-                Console.WriteLine($"  -> Distant Mountain generation failed: {ex.Message}");
+                WriteLogDetail("Distant Mountain generation failed", ex.Message);
             }
         }
 
@@ -202,13 +204,12 @@ internal static partial class Program
             failed++;
         }
 
-        Console.WriteLine(
-            $"Distant Mountain rolling writer peak memory window: " +
-            $"{rollingWriter.PeakPendingCount:N0} lo_tile grid(s).");
+        WriteLogSubsection("Distant Mountain Output");
+        WriteLogDetail("Peak memory window", $"{rollingWriter.PeakPendingCount:N0} lo_tile grid(s)", 4);
 
         int indexedLoTiles = WriteTsreLowTerrainIndex(route.RouteDir, outputDir);
-        Console.WriteLine($"Distant Mountains: rebuilt TSRE low-terrain index with {indexedLoTiles:N0} lo_tiles.");
-        Console.WriteLine($"\nDistant Mountains done. Generated={built:N0}, skipped={skipped:N0}, failed={failed:N0}, total={total:N0}.");
+        WriteLogDetail("Terrain index", $"rebuilt with {indexedLoTiles:N0} lo_tiles", 4);
+        Console.WriteLine($"\n  Distant Mountains done. Generated={built:N0}, skipped={skipped:N0}, failed={failed:N0}, total={total:N0}.");
         return failed;
     }
 

@@ -1,6 +1,7 @@
+// SCO LIDEX - route OSM geodata and final PolyVeg surfaces for TSRE GenX.
 // Copyright (C) Scott Brunner, Beast of Burden
-// Route-local OSM geodata and final PolyVeg surfaces used by TSRE GenX.
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System.Security.Cryptography;
 using System.Text;
@@ -41,7 +42,7 @@ internal static partial class Program
                 {
                     type = "FeatureCollection",
                     schemaVersion = 2,
-                    generatorRevision = 4,
+                    generatorRevision = 5,
                     source = new
                     {
                         pbfPath = pbf.FullName,
@@ -108,7 +109,7 @@ internal static partial class Program
     private sealed class RoutePolyVegGeodataBuilder : IDisposable
     {
         private const int SchemaVersion = 2;
-        private const int GeneratorRevision = 4;
+        private const int GeneratorRevision = 5;
         private const double CoverageBufferMetres = 2048.0;
         private const double GeometryAreaToleranceSquareMetres = 0.01;
         private const double OverlayPrecisionMetres = 0.01;
@@ -1072,9 +1073,9 @@ internal static partial class Program
                 "woodland",
                 "natural=tree_row",
                 TsreDrawOrder(6),
-                133,
-                193,
-                133,
+                NaturalWoodRed,
+                NaturalWoodGreen,
+                NaturalWoodBlue,
                 polyVegProperties,
                 normalized));
             polyVegSourceCount++;
@@ -1590,6 +1591,7 @@ internal static partial class Program
                     properties.GetProperty("category").GetString() == "woodland" &&
                     properties.GetProperty("styleId").GetString() == "natural=tree_row" &&
                     properties.GetProperty("drawOrder").GetInt32() == TsreDrawOrder(6) &&
+                    properties.GetProperty("fillColor").GetString() == "#8DC46C" &&
                     properties.GetProperty("natural").GetString() == "tree_row" &&
                     properties.GetProperty("derivedWidthMetres").GetString() == "10";
             });

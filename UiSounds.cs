@@ -1,5 +1,7 @@
-// SCO LIDEX - interface sound dispatcher
+// SCO LIDEX - non-overlapping interface sound dispatcher.
 // Copyright (C) Scott Brunner, Beast of Burden
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 
 using System;
 using System.Collections.Generic;

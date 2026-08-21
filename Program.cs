@@ -1,10 +1,7 @@
-// SCO LIDEX - Open Rails / MSTS Cloud Terrain Builder
+// SCO LIDEX - terrain engine orchestration and command-line entry points.
 // Copyright (C) Scott Brunner, Beast of Burden
-//
-// This file contains the terrain generation engine: route/tile discovery,
-// projection mapping, USGS DEM product lookup, GDAL raster sampling, seamless
-// tile merging, distant mountain generation, and command-line entry points.
-// SCO LIDEX is distributed under GNU GPL v3 or later. See LICENSE.txt.
+// Part of the SCO LIDEX Terrain Builder application.
+// Licensed under GNU GPL v3 or later. See LICENSE.txt.
 //
 // USGS cloud endpoint used for DEM product discovery:
 //   https://tnmaccess.nationalmap.gov/api/v1/products
@@ -221,6 +218,12 @@ internal static partial class Program
             return;
         }
 
+        if (args.Contains("--log-format-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunLogFormatProbe();
+            return;
+        }
+
         await RunConsoleAsync(args, CancellationToken.None);
     }
 
@@ -321,14 +324,107 @@ internal static partial class Program
             : $"{value:N2} {units[unit]}";
     }
 
+    private static void WriteLogBanner(string title)
+    {
+        string heading = title.Trim().ToUpperInvariant();
+        string rule = new('=', Math.Max(heading.Length, 32));
+        Console.WriteLine(rule);
+        Console.WriteLine(heading);
+        Console.WriteLine(rule);
+        Console.WriteLine();
+    }
+
+    private static void WriteLogSection(string title)
+    {
+        string heading = title.Trim().ToUpperInvariant();
+        Console.WriteLine();
+        Console.WriteLine(heading);
+        Console.WriteLine(new string('-', heading.Length));
+    }
+
+    private static void WriteLogSubsection(string title)
+    {
+        string heading = title.Trim().ToUpperInvariant();
+        Console.WriteLine();
+        Console.WriteLine($"  {heading}");
+        Console.WriteLine($"  {new string('-', heading.Length)}");
+    }
+
+    private static void WriteLogDetail(string label, string value, int indent = 2)
+    {
+        Console.WriteLine($"{new string(' ', Math.Max(0, indent))}{label.Trim().ToUpperInvariant()}: {value}");
+    }
+
+    private static void WriteLogBullet(string message, int indent = 2)
+    {
+        Console.WriteLine($"{new string(' ', Math.Max(0, indent))}• {message}");
+    }
+
+    private static void WriteOperationAborted()
+    {
+        WriteLogSection("Operation Aborted");
+        WriteLogDetail("Result", "STOPPED SAFELY");
+        WriteLogDetail(
+            "Details",
+            "the active operation reached a safe boundary; completed pending output was flushed and no additional stage was started");
+        Console.WriteLine("STATUS: OPERATION ABORTED");
+    }
+
+    private static void RunLogFormatProbe()
+    {
+        TextWriter original = Console.Out;
+        using StringWriter capture = new(CultureInfo.InvariantCulture);
+        Console.SetOut(capture);
+        try
+        {
+            WriteLogBanner("SCO LIDEX LOG FORMAT PROBE");
+            WriteLogSection("Route Summary");
+            WriteLogDetail("Route", @"C:\Routes\Probe");
+            WriteLogDetail("Terrain tiles", "2");
+            WriteLogSubsection("DEM Products");
+            WriteLogDetail("DEM product", "1m | first.tif", 4);
+            WriteLogDetail("Contribution", "65,536 / 65,536 samples", 6);
+            Console.WriteLine();
+            WriteLogDetail("DEM product", "10m | fallback.tif", 4);
+            WriteLogDetail("Contribution", "512 / 65,536 samples", 6);
+            WriteLogSection("Operation Result");
+            WriteLogDetail("Result", "PASSED");
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        string output = capture.ToString();
+        string[] required =
+        [
+            "SCO LIDEX LOG FORMAT PROBE",
+            "ROUTE SUMMARY",
+            "  ROUTE: C:\\Routes\\Probe",
+            "  DEM PRODUCTS",
+            "    DEM PRODUCT: 1m | first.tif",
+            "      CONTRIBUTION: 65,536 / 65,536 samples",
+            "OPERATION RESULT",
+            "  RESULT: PASSED",
+        ];
+        if (required.Any(value => !output.Contains(value, StringComparison.Ordinal)) ||
+            Regex.IsMatch(output, @"\[\d{2}:\d{2}:\d{2}\]") ||
+            !TopoForm.HidesInternalStatusControlTextForProbe("STATUS: TILES - US - HIGH RES\r\n") ||
+            TopoForm.HidesInternalStatusControlTextForProbe("  RESULT: PASSED\r\n"))
+        {
+            throw new InvalidDataException("human-friendly log formatting probe failed");
+        }
+
+        Console.Write(output);
+        Console.WriteLine("Log format probe: PASSED");
+    }
+
     // Main terrain-build entry point used by both the CLI and the GUI wrapper.
     // The GUI simply converts selected controls into command-line style args,
     // redirects Console output into the log window, and lets this engine run.
     internal static async Task RunConsoleAsync(string[] args, CancellationToken cancellationToken)
     {
-        Console.WriteLine("=========================================");
-        Console.WriteLine(" SCO LIDEX Cloud Terrain Builder ");
-        Console.WriteLine("=========================================\n");
+        WriteLogBanner("SCO LIDEX TERRAIN RUN");
 
         bool overwriteFlag = args.Contains("--overwrite", StringComparer.OrdinalIgnoreCase);
         bool inspectOnly = !args.Contains("--write", StringComparer.OrdinalIgnoreCase);
@@ -529,22 +625,21 @@ internal static partial class Program
             }
         }
 
-        Console.WriteLine("\nInitializing GDAL Engine...");
+        WriteLogSection("Runtime Initialization");
+        WriteLogDetail("GDAL", "initializing bundled geospatial engine");
         GdalBase.ConfigureAll();
         Gdal.SetConfigOption("GDAL_HTTP_UNSAFESSL", "YES");
 
         using HttpClient httpClient = new() { Timeout = TimeSpan.FromMinutes(4) };
-        Console.WriteLine("\n=========================================");
-        Console.WriteLine(" RUN DATA SOURCE STATUS ");
-        Console.WriteLine("=========================================");
+        WriteLogSection("Run Data Source Status");
         if (createRouteTiles)
         {
             PrintDataSourceStatus("Terrain DEM - 1m", "USGS - The National Map", demSources.UsePrimary);
-            Console.WriteLine($"Details: {FormatUsgsRunDetail(demSources.UsePrimary, primaryServiceAvailable)}");
+            WriteLogDetail("Details", FormatUsgsRunDetail(demSources.UsePrimary, primaryServiceAvailable), 4);
             PrintDataSourceStatus("Terrain DEM - approximately 5m", "USGS - The National Map", demSources.UseIntermediate);
-            Console.WriteLine($"Details: {FormatUsgsRunDetail(demSources.UseIntermediate, intermediateServiceAvailable)}");
+            WriteLogDetail("Details", FormatUsgsRunDetail(demSources.UseIntermediate, intermediateServiceAvailable), 4);
             PrintDataSourceStatus("Terrain DEM - 10m", "USGS - The National Map", demSources.UseFallback);
-            Console.WriteLine($"Details: {FormatUsgsRunDetail(demSources.UseFallback, fallbackServiceAvailable)}");
+            WriteLogDetail("Details", FormatUsgsRunDetail(demSources.UseFallback, fallbackServiceAvailable), 4);
         }
         if (createRouteTiles || distantMountains || distantMountainsSkippedByScan)
         {
@@ -559,9 +654,12 @@ internal static partial class Program
                 "OpenStreetMap regional extract",
                 mapCacheOnly ? "Local Geofabrik PBF cache" : "Geofabrik",
                 true);
-            Console.WriteLine(mapCacheOnly
-                ? "Details: cached map extract will be used; Geofabrik will not be polled."
-                : "Details: Geofabrik remote source is enabled with local-cache fallback.");
+            WriteLogDetail(
+                "Details",
+                mapCacheOnly
+                    ? "cached map extract will be used; Geofabrik will not be polled"
+                    : "Geofabrik remote source is enabled with local-cache fallback",
+                4);
         }
         else if (mapsSkippedByScan)
         {
@@ -619,6 +717,12 @@ internal static partial class Program
                     demSources,
                     overwriteFlag,
                     cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    WriteOperationAborted();
+                    return;
+                }
+
                 if (!completed)
                 {
                     Console.WriteLine("STATUS: FAILURE - TILES");
@@ -641,7 +745,7 @@ internal static partial class Program
 
             if (cancellationToken.IsCancellationRequested)
             {
-                Console.WriteLine("STATUS: OPERATION ABORTED");
+                WriteOperationAborted();
                 return;
             }
 
@@ -651,7 +755,7 @@ internal static partial class Program
                 int dmFailures = await GenerateDistantMountainTilesAsync(route, loOutputDir, loTileRadius, loSampleOffsetX, loSampleOffsetY, sourceBiasEastMeters, sourceBiasNorthMeters, markerCoverage, trackDatabaseCoverage, kmlCoverage, textFileCoverage, overwriteFlag, demSources, cancellationToken);
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    Console.WriteLine("STATUS: OPERATION ABORTED");
+                    WriteOperationAborted();
                     return;
                 }
 
@@ -677,6 +781,11 @@ internal static partial class Program
                 {
                     await GenerateMapTilesAsync(route, mapper, processingTiles, requestedMapTile, limit, mapCacheOnly, cancellationToken);
                 }
+                catch (OperationCanceledException)
+                {
+                    WriteOperationAborted();
+                    return;
+                }
                 catch
                 {
                     Console.WriteLine("STATUS: FAILURE - OSM / MAPS");
@@ -690,6 +799,9 @@ internal static partial class Program
 
         if (createRouteTiles)
         {
+            WriteLogSection("Normal Terrain Generation");
+            WriteLogDetail("Selected tiles", $"{totalTiles:N0}");
+            WriteLogDetail("Mode", overwriteFlag ? "OVERWRITE" : "APPEND");
             rollingWriter = inspectOnly ? null : new RollingTerrainWriter(outputDir, cleanTileTemplate);
 
             for (int tileIndex = 0; tileIndex < processingTiles.Count; tileIndex++)
@@ -703,7 +815,7 @@ internal static partial class Program
                 TerrainTile tile = processingTiles[tileIndex];
                 int tileNumber = tileIndex + 1;
                 int remaining = totalTiles - tileNumber;
-                Console.WriteLine($"\n[{tileNumber:N0}/{totalTiles:N0}] {tile.TileFile.Name} ({remaining:N0} remaining)");
+                Console.WriteLine($"\n[{tileNumber:N0}/{totalTiles:N0}] TILE: {tile.TileFile.Name} | {remaining:N0} remaining");
 
                 if (!inspectOnly)
                 {
@@ -716,26 +828,26 @@ internal static partial class Program
                 if (!overwriteFlag && stats is not null && !stats.IsEmpty)
                 {
                     skipped++;
-                    Console.WriteLine($"  -> Skipped: raw grid already has {stats.ValidCount:N0} height samples.");
+                    WriteLogDetail("Skipped", $"raw grid already has {stats.ValidCount:N0} valid height samples");
                     rollingWriter?.FlushRowsBefore(tile.WorldTile?.Z - 1 ?? int.MinValue);
                     PrintProgressCheckpoint(tileNumber, totalTiles, generatedCount, skipped, failed);
                     continue;
                 }
 
-                Console.WriteLine($"  -> Raw heights: {Path.GetFileName(tile.RawHeightPath ?? "(not referenced)")}");
+                WriteLogDetail("Raw heights", Path.GetFileName(tile.RawHeightPath ?? "(not referenced)"));
 
                 if (stats is null)
                 {
-                    Console.WriteLine("  -> Could not read raw height grid.");
+                    WriteLogDetail("Raw grid", "UNREADABLE");
                 }
                 else
                 {
-                    Console.WriteLine($"  -> Grid {stats.Width}x{stats.Height}, valid={stats.ValidCount:N0}, missing={stats.MissingCount:N0}, min={stats.MinHeight}, max={stats.MaxHeight}");
+                    WriteLogDetail("Raw grid", $"{stats.Width}x{stats.Height} | valid={stats.ValidCount:N0} | missing={stats.MissingCount:N0} | min={stats.MinHeight} | max={stats.MaxHeight}");
                 }
 
                 if (inspectOnly)
                 {
-                    Console.WriteLine("  -> Inspect-only mode; no DEM request or route write performed.");
+                    WriteLogDetail("Inspect only", "no DEM request or route write performed");
                     PrintProgressCheckpoint(tileNumber, totalTiles, generatedCount, skipped, failed);
                     continue;
                 }
@@ -751,7 +863,7 @@ internal static partial class Program
                     failed++;
                     unmappableFailedNormalTileNames.Add(GetTerrainTileBaseName(tile));
                     MarkTerrainTileForAppendRetry(tile);
-                    Console.WriteLine("  -> Cannot generate: tile-to-world or marker-based geographic coverage is unavailable.");
+                    WriteLogDetail("Failed", "tile-to-world or marker-based geographic coverage is unavailable");
                     PrintProgressCheckpoint(tileNumber, totalTiles, generatedCount, skipped, failed);
                     continue;
                 }
@@ -760,7 +872,7 @@ internal static partial class Program
 
                 GeoSampleGrid sampleGrid = mapper.GetSampleGrid(tile.WorldTile, sourceOffsetX, sourceOffsetZ, sourceScaleX, sourceScaleZ, sourceBiasEastMeters, sourceBiasNorthMeters);
                 (double minLon, double minLat, double maxLon, double maxLat) = sampleGrid.BoundingBox;
-                Console.WriteLine($"  -> Estimated bbox lon {minLon:F6}..{maxLon:F6}, lat {minLat:F6}..{maxLat:F6}");
+                WriteLogDetail("DEM bounds", $"lon {minLon:F6}..{maxLon:F6} | lat {minLat:F6}..{maxLat:F6}");
 
                 try
                 {
@@ -826,15 +938,15 @@ internal static partial class Program
                         builtWithNeighborFill++;
                     }
 
-                    Console.WriteLine($"  -> Source samples used: {PrimaryDemLabel}={result.PrimarySamplesUsed:N0}, {IntermediateDemLabel}={result.IntermediateSamplesUsed:N0}, {FallbackDemLabel}={result.FallbackSamplesUsed:N0}, {GlobalDemLabel}={result.GlobalSamplesUsed:N0}, neighbor-fill={result.NeighborFilledSamples:N0}");
-                    Console.WriteLine($"  -> Generated grid valid={generatedStats.ValidCount:N0}, missing={generatedStats.MissingCount:N0}, min={generatedStats.MinHeight}, max={generatedStats.MaxHeight}");
+                    WriteLogDetail("Source samples used", $"{PrimaryDemLabel}={result.PrimarySamplesUsed:N0}, {IntermediateDemLabel}={result.IntermediateSamplesUsed:N0}, {FallbackDemLabel}={result.FallbackSamplesUsed:N0}, {GlobalDemLabel}={result.GlobalSamplesUsed:N0}, neighbor-fill={result.NeighborFilledSamples:N0}");
+                    WriteLogDetail("Generated grid", $"valid={generatedStats.ValidCount:N0} | missing={generatedStats.MissingCount:N0} | min={generatedStats.MinHeight} | max={generatedStats.MaxHeight}");
                 }
                 catch (Exception ex)
                 {
                     failed++;
                     retryableFailedNormalTileNames.Add(GetTerrainTileBaseName(tile));
                     MarkTerrainTileForAppendRetry(tile);
-                    Console.WriteLine($"  -> DEM generation failed: {ex.Message}");
+                    WriteLogDetail("DEM generation failed", ex.Message);
                 }
 
                 PrintProgressCheckpoint(tileNumber, totalTiles, generatedCount, skipped, failed);
@@ -844,9 +956,11 @@ internal static partial class Program
             {
                 try
                 {
-                    Console.WriteLine($"\nFlushing {rollingWriter.PendingCount:N0} pending generated tile(s) to {outputDir}...");
+                    WriteLogSubsection("Terrain Output Write");
+                    WriteLogDetail("Pending tiles", $"{rollingWriter.PendingCount:N0}", 4);
+                    WriteLogDetail("Output", outputDir, 4);
                     rollingWriter.FlushAll();
-                    Console.WriteLine($"Rolling terrain writer peak memory window: {rollingWriter.PeakPendingCount:N0} tile grids.");
+                    WriteLogDetail("Peak memory window", $"{rollingWriter.PeakPendingCount:N0} tile grids", 4);
                 }
                 catch (Exception ex)
                 {
@@ -862,13 +976,14 @@ internal static partial class Program
 
         if (cancellationToken.IsCancellationRequested)
         {
-            Console.WriteLine("STATUS: OPERATION ABORTED");
+            WriteOperationAborted();
             return;
         }
 
         if (createRouteTiles && failed > 0)
         {
-            Console.WriteLine($"\nDone. Generated={generatedCount:N0}, skipped={skipped:N0}, failed={failed:N0}, total={totalTiles:N0}.");
+            WriteLogSection("Terrain Result");
+            Console.WriteLine($"  TERRAIN DONE. Generated={generatedCount:N0}, skipped={skipped:N0}, failed={failed:N0}, total={totalTiles:N0}.");
             PrintFailedTileTextFileBlock(retryableFailedNormalTileNames);
             PrintUnmappableTileBlock(unmappableFailedNormalTileNames);
             Console.WriteLine("Terrain stage contains failures. DM and map stages were not started; fix the error or run Append first.");
@@ -897,7 +1012,7 @@ internal static partial class Program
             int dmFailures = await GenerateDistantMountainTilesAsync(route, loOutputDir, loTileRadius, loSampleOffsetX, loSampleOffsetY, sourceBiasEastMeters, sourceBiasNorthMeters, markerCoverage, trackDatabaseCoverage, kmlCoverage, textFileCoverage, overwriteFlag, demSources, cancellationToken);
             if (cancellationToken.IsCancellationRequested)
             {
-                Console.WriteLine("STATUS: OPERATION ABORTED");
+                WriteOperationAborted();
                 return;
             }
 
@@ -923,6 +1038,11 @@ internal static partial class Program
                 {
                     await GenerateMapTilesAsync(route, mapper, processingTiles, requestedMapTile, limit, mapCacheOnly, cancellationToken);
                 }
+                catch (OperationCanceledException)
+                {
+                    WriteOperationAborted();
+                    return;
+                }
                 catch
                 {
                     Console.WriteLine("STATUS: FAILURE - OSM / MAPS");
@@ -935,13 +1055,14 @@ internal static partial class Program
             Console.WriteLine("\nMap tiles: inspect-only mode; no PBF download, ACE texture, or terrain material write performed.");
         }
 
-        Console.WriteLine($"\nDone. Generated={generatedCount:N0}, skipped={skipped:N0}, failed={failed:N0}, total={totalTiles:N0}.");
+        WriteLogSection("Operation Result");
+        Console.WriteLine($"  TERRAIN DONE. Generated={generatedCount:N0}, skipped={skipped:N0}, failed={failed:N0}, total={totalTiles:N0}.");
         PrintFailedTileTextFileBlock(retryableFailedNormalTileNames);
         PrintUnmappableTileBlock(unmappableFailedNormalTileNames);
         if (!inspectOnly)
         {
-            Console.WriteLine($"Resolution summary: {PrimaryDemLabel} only={builtWithPrimaryOnly:N0}, mixed {PrimaryDemLabel}+{IntermediateDemLabel}={builtWithPrimaryAndIntermediate:N0}, mixed {PrimaryDemLabel}+{FallbackDemLabel}={builtWithPrimaryAndFallback:N0}, {IntermediateDemLabel} only={builtWithIntermediateOnly:N0}, mixed {IntermediateDemLabel}+{FallbackDemLabel}={builtWithIntermediateAndFallback:N0}, {FallbackDemLabel} only={builtWithFallbackOnly:N0}, tiles including {GlobalDemLabel}={builtWithGlobal:N0}, neighbor-filled={builtWithNeighborFill:N0}.");
-            Console.WriteLine($"Source use summary: tiles using {PrimaryDemLabel}={tilesUsingPrimary:N0}, {IntermediateDemLabel}={tilesUsingIntermediate:N0}, {FallbackDemLabel}={tilesUsingFallback:N0}, {GlobalDemLabel}={tilesUsingGlobal:N0}.");
+            WriteLogDetail("Resolution summary", $"{PrimaryDemLabel} only={builtWithPrimaryOnly:N0} | mixed {PrimaryDemLabel}+{IntermediateDemLabel}={builtWithPrimaryAndIntermediate:N0} | mixed {PrimaryDemLabel}+{FallbackDemLabel}={builtWithPrimaryAndFallback:N0} | {IntermediateDemLabel} only={builtWithIntermediateOnly:N0} | mixed {IntermediateDemLabel}+{FallbackDemLabel}={builtWithIntermediateAndFallback:N0} | {FallbackDemLabel} only={builtWithFallbackOnly:N0} | tiles including {GlobalDemLabel}={builtWithGlobal:N0} | neighbor-filled={builtWithNeighborFill:N0}");
+            WriteLogDetail("Source use summary", $"tiles using {PrimaryDemLabel}={tilesUsingPrimary:N0}, {IntermediateDemLabel}={tilesUsingIntermediate:N0}, {FallbackDemLabel}={tilesUsingFallback:N0}, {GlobalDemLabel}={tilesUsingGlobal:N0}");
         }
 
         Console.WriteLine("STATUS: OPERATION COMPLETE");
@@ -951,10 +1072,8 @@ internal static partial class Program
     // representative USGS product availability before Run is allowed to write.
     internal static async Task<ScanSummary> ScanRouteAsync(string routeDir, ScanOptions options, CancellationToken cancellationToken)
     {
-        Console.WriteLine("=========================================");
-        Console.WriteLine(" SCO LIDEX Route Scan ");
-        Console.WriteLine("=========================================\n");
-        Console.WriteLine("This Scan phase is read-only. Any terrain-resolution reset occurs only after the GUI's explicit confirmation.\n");
+        WriteLogBanner("SCO LIDEX ROUTE SCAN");
+        WriteLogDetail("Safety", "READ-ONLY; terrain-resolution reset requires explicit GUI confirmation");
 
         bool blockingFailure = false;
         int unreadableRouteTiles = 0;
@@ -985,16 +1104,15 @@ internal static partial class Program
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
             }
 
-            Console.WriteLine();
-            Console.WriteLine("Route-wide terrain resolution:");
-            Console.WriteLine($"  Selected output: {TerrainOutputLabel(requestedResolution)}");
-            Console.WriteLine($"  Matching tiles: {resolutionInspection.MatchingTiles:N0} / {resolutionInspection.TotalTiles:N0}");
+            WriteLogSection("Terrain Resolution Preflight");
+            WriteLogDetail("Selected output", TerrainOutputLabel(requestedResolution));
+            WriteLogDetail("Matching tiles", $"{resolutionInspection.MatchingTiles:N0} / {resolutionInspection.TotalTiles:N0}");
             if (resolutionInspection.MismatchedTiles.Count > 0)
             {
-                Console.WriteLine($"  Mismatched tiles: {resolutionInspection.MismatchedTiles.Count:N0}");
+                WriteLogDetail("Mismatched tiles", $"{resolutionInspection.MismatchedTiles.Count:N0}");
                 if (options.ForceResolutionMismatches)
                 {
-                    Console.WriteLine("  Plan: approved for route-wide forcing during Run.");
+                    WriteLogDetail("Plan", "approved for route-wide forcing during Run");
                 }
                 else
                 {
@@ -1007,7 +1125,7 @@ internal static partial class Program
 
             if (resolutionInspection.UnrecognizedTiles.Count > 0)
             {
-                Console.WriteLine($"  Unrecognized tiles: {resolutionInspection.UnrecognizedTiles.Count:N0}");
+                WriteLogDetail("Unrecognized tiles", $"{resolutionInspection.UnrecognizedTiles.Count:N0}");
                 foreach (TerrainResolutionIssue issue in resolutionInspection.UnrecognizedTiles)
                 {
                     invalidTiles.Add($"{issue.TileName} ({issue.Detail})");
@@ -1049,10 +1167,11 @@ internal static partial class Program
 
             bool createsSelectionCoverage = options.MarkerCoverage || options.TrackDatabaseCoverage || options.KmlCoverage || options.TextFileCoverage;
             string existingQualifier = createsSelectionCoverage ? " currently existing" : "";
-            Console.WriteLine($"\nRoute tile scan: {processingTiles.Count:N0}{existingQualifier} selected tile(s).");
+            WriteLogSection("Route Tile Preflight");
+            WriteLogDetail("Selected tiles", $"{processingTiles.Count:N0}{existingQualifier}");
             if (createsSelectionCoverage && options.CreateRouteTiles)
             {
-                Console.WriteLine("Route tile plan: Run will create and index any missing selected base terrain tiles.");
+                WriteLogDetail("Plan", "Run will create and index any missing selected base terrain tiles");
             }
             int expectedGridSize = options.Hd4mOutput
                 ? ExperimentalRawGridSize
@@ -1128,9 +1247,11 @@ internal static partial class Program
             }
             else
             {
-                Console.WriteLine(options.CreateRouteTiles
-                    ? $"Route tile scan: all selected tiles are named, decoded, positioned, and readable as {TerrainOutputLabel(requestedResolution)}."
-                    : "Map tile scan: all selected terrain tiles are named, decoded, and geographically positioned.");
+                WriteLogDetail(
+                    "Passed",
+                    options.CreateRouteTiles
+                        ? $"all selected tiles are named, decoded, positioned, and readable as {TerrainOutputLabel(requestedResolution)}"
+                        : "all selected terrain tiles are named, decoded, and geographically positioned");
             }
 
             if (options.CreateMapTiles)
@@ -1143,7 +1264,7 @@ internal static partial class Program
                 }
                 else
                 {
-                    Console.WriteLine($"Map reference preflight: {processingTiles.Count:N0} TSRE F3 terrain_maps PNG output(s); terrain .t materials and UVs will remain unchanged.");
+                    WriteLogDetail("Map outputs", $"{processingTiles.Count:N0} TSRE F3 terrain_maps PNG files | terrain .t materials and UVs remain unchanged");
                 }
             }
         }
@@ -1169,6 +1290,7 @@ internal static partial class Program
         HashSet<LoTileCoordinate> dmCoverage = [];
         if (options.CreateDistantMountains)
         {
+            WriteLogSection("Distant Mountain Preflight");
             try
             {
                 dmCoverage = BuildDistantMountainCoverage(
@@ -1185,7 +1307,7 @@ internal static partial class Program
                 blockingFailure = true;
             }
 
-            Console.WriteLine($"Distant Mountain scan: {dmCoverage.Count:N0} selected lo_tile(s).");
+            WriteLogDetail("Selected lo_tiles", $"{dmCoverage.Count:N0}");
             string loOutputDir = Path.Combine(route!.RouteDir, "lo_tiles");
             if (HasDemexStyleDistantMountainFiles(loOutputDir))
             {
@@ -1265,6 +1387,7 @@ internal static partial class Program
                 }
             }
 
+            WriteLogSection("Representative Source Checks");
             using HttpClient httpClient = new() { Timeout = TimeSpan.FromSeconds(45) };
             GeoSampleGrid? sourceGrid = null;
             if (options.CreateRouteTiles && processingTiles.FirstOrDefault(t => t.WorldTile is not null) is TerrainTile firstTile)
@@ -1323,17 +1446,15 @@ internal static partial class Program
             (options.CreateDistantMountains && !distantMountainCanRun) ||
             (options.CreateMapTiles && !mapSource.CanRun);
 
-        Console.WriteLine("\n=========================================");
-        Console.WriteLine(" SCAN DATA SOURCE STATUS ");
-        Console.WriteLine("=========================================");
+        WriteLogSection("Scan Data Source Status");
         if (options.CreateRouteTiles)
         {
             PrintDataSourceStatus("Terrain DEM - 1m", "USGS - The National Map", demSources.UsePrimary);
-            Console.WriteLine($"Details: {FormatUsgsScanDetail(primaryStatus, demSources.UsePrimary)}");
+            WriteLogDetail("Details", FormatUsgsScanDetail(primaryStatus, demSources.UsePrimary), 4);
             PrintDataSourceStatus("Terrain DEM - approximately 5m", "USGS - The National Map", demSources.UseIntermediate);
-            Console.WriteLine($"Details: {FormatUsgsScanDetail(intermediateStatus, demSources.UseIntermediate)}");
+            WriteLogDetail("Details", FormatUsgsScanDetail(intermediateStatus, demSources.UseIntermediate), 4);
             PrintDataSourceStatus("Terrain DEM - 10m", "USGS - The National Map", demSources.UseFallback);
-            Console.WriteLine($"Details: {FormatUsgsScanDetail(fallbackStatus, demSources.UseFallback)}");
+            WriteLogDetail("Details", FormatUsgsScanDetail(fallbackStatus, demSources.UseFallback), 4);
         }
         if (options.CreateRouteTiles || options.CreateDistantMountains)
         {
@@ -1341,7 +1462,7 @@ internal static partial class Program
                 options.CreateRouteTiles ? "Terrain/DM DEM - 30m" : "Distant Mountain DEM - 30m",
                 "Copernicus GLO-30",
                 demSources.UseGlobal);
-            Console.WriteLine($"Details: {FormatGlobalScanDetail(globalStatus, demSources.UseGlobal)}");
+            WriteLogDetail("Details", FormatGlobalScanDetail(globalStatus, demSources.UseGlobal), 4);
         }
         if (options.CreateMapTiles)
         {
@@ -1349,16 +1470,17 @@ internal static partial class Program
                 "OpenStreetMap regional extract",
                 mapSource.CacheOnly ? "Local Geofabrik PBF cache" : "Geofabrik",
                 mapSource.CanRun);
-            Console.WriteLine($"Details: {mapSource.Detail}");
+            WriteLogDetail("Details", mapSource.Detail, 4);
         }
 
-        Console.WriteLine("\nRun plan:");
-        Console.WriteLine($"  {TerrainOutputLabel(requestedResolution)}: {StagePlanText(options.CreateRouteTiles, routeCanRun)}");
-        Console.WriteLine($"  Distant Mountains: {StagePlanText(options.CreateDistantMountains, distantMountainCanRun)}{(options.CreateDistantMountains ? " (Copernicus GLO-30 only)" : "")}");
-        Console.WriteLine($"  Map overlays: {StagePlanText(options.CreateMapTiles, mapSource.CanRun)}{(mapSource.CacheOnly ? " (cached PBF; no Geofabrik polling)" : "")}");
+        WriteLogSection("Run Plan");
+        WriteLogDetail(TerrainOutputLabel(requestedResolution), StagePlanText(options.CreateRouteTiles, routeCanRun));
+        WriteLogDetail("Distant Mountains", $"{StagePlanText(options.CreateDistantMountains, distantMountainCanRun)}{(options.CreateDistantMountains ? " | Copernicus GLO-30 only" : "")}");
+        WriteLogDetail("Map overlays", $"{StagePlanText(options.CreateMapTiles, mapSource.CanRun)}{(mapSource.CacheOnly ? " | cached PBF; no Geofabrik polling" : "")}");
 
         string result = blockingFailure ? "FAILED" : hasWarnings ? "PASSED WITH WARNINGS" : "PASSED";
-        Console.WriteLine($"\nScan result: {result}");
+        WriteLogSection("Scan Result");
+        WriteLogDetail("Result", result);
         return new ScanSummary(
             !blockingFailure,
             options.CreateRouteTiles ? processingTiles.Count : 0,
@@ -2035,9 +2157,8 @@ internal static partial class Program
     private static void PrintDataSourceStatus(string data, string source, bool passed)
     {
         Console.WriteLine();
-        Console.WriteLine($"Data:   {data}");
-        Console.WriteLine($"Source: {source}");
-        Console.WriteLine($"Status: {(passed ? "PASSED" : "FAILED")}");
+        WriteLogDetail(passed ? "Passed" : "Failed", data);
+        WriteLogDetail("Source", source, 4);
     }
 
     private static string FormatUsgsScanDetail(UsgsDatasetAvailability status, bool enabledForRun)
@@ -2080,7 +2201,10 @@ internal static partial class Program
     {
         if (processed == total || processed % 10 == 0)
         {
-            Console.WriteLine($"  -> Progress: {processed:N0}/{total:N0} processed, {total - processed:N0} remaining, {generated:N0} generated, {skipped:N0} skipped, {failed:N0} failed.");
+            WriteLogDetail(
+                "Progress",
+                $"{processed:N0}/{total:N0} processed | {total - processed:N0} remaining | " +
+                $"{generated:N0} generated | {skipped:N0} skipped | {failed:N0} failed");
         }
     }
 
@@ -2096,12 +2220,11 @@ internal static partial class Program
             return;
         }
 
-        Console.WriteLine();
-        Console.WriteLine("Failed tiles for SCOLIDEXTiles.txt:");
-        Console.WriteLine("# Paste the tile names below into ROUTE\\SCOLIDEXTiles.txt and run Use Text File + Append.");
+        WriteLogSection("Retryable Failed Tiles");
+        WriteLogDetail("Action", "Paste these names into ROUTE\\SCOLIDEXTiles.txt, then run Use Text File + Append");
         foreach (string tileName in failedTileNames)
         {
-            Console.WriteLine(tileName);
+            WriteLogBullet(tileName);
         }
     }
 
@@ -2112,13 +2235,12 @@ internal static partial class Program
             return;
         }
 
-        Console.WriteLine();
-        Console.WriteLine("Unmappable failed tiles:");
-        Console.WriteLine("# These tiles could not be matched to ORTS world tile coordinates.");
-        Console.WriteLine("# A later Append/Text File retry cannot process them until the route has matching world files or SCO LIDEX supports this tile naming depth.");
+        WriteLogSection("Unmappable Failed Tiles");
+        WriteLogDetail("Cause", "tiles could not be matched to ORTS world tile coordinates");
+        WriteLogDetail("Action", "restore matching world files or add support for this tile naming depth before retrying");
         foreach (string tileName in failedTileNames)
         {
-            Console.WriteLine(tileName);
+            WriteLogBullet(tileName);
         }
     }
 

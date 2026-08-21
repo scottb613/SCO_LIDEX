@@ -1,3 +1,8 @@
+@rem SCO LIDEX - Windows desktop-shortcut installer.
+@rem Copyright (C) Scott Brunner, Beast of Burden
+@rem Part of the SCO LIDEX Terrain Builder application.
+@rem Licensed under GNU GPL v3 or later. See LICENSE.txt.
+
 @echo off
 setlocal
 
