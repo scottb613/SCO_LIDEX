@@ -96,7 +96,7 @@ internal static partial class Program
         List<string> failures = [];
         int gridHeight = sampleGrid.Longitudes.GetLength(0);
         int gridWidth = sampleGrid.Longitudes.GetLength(1);
-        short[,] mergedHeights = CreateMissingHeightGrid(gridWidth, gridHeight);
+        float[,] mergedHeights = CreateMissingHeightGrid(gridWidth, gridHeight);
         DemWindowSearchResult primarySearch = new([], SourceHiccup: false);
         int primarySamplesUsed = 0;
         if (sourcePolicy.UsePrimary)
@@ -105,7 +105,7 @@ internal static partial class Program
             primarySamplesUsed = MergeWindows(primarySearch.Windows, mergedHeights);
         }
 
-        int missingAfterPrimary = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
+        int missingAfterPrimary = mergedHeights.Cast<float>().Count(v => v == RawMissingHeight);
         ThrowIfSourceHiccupLeftMissingSamples(primarySearch, PrimaryDemLabel, missingAfterPrimary);
         int intermediateSamplesUsed = 0;
         int fallbackSamplesUsed = 0;
@@ -115,21 +115,21 @@ internal static partial class Program
             WriteLogDetail("Fallback", $"{missingAfterPrimary:N0} samples unresolved by {PrimaryDemLabel} | trying {IntermediateDemLabel} ({IntermediateDemDataset})");
             DemWindowSearchResult intermediateSearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, IntermediateDemDataset, failures);
             intermediateSamplesUsed = MergeWindows(intermediateSearch.Windows, mergedHeights);
-            int missingAfterIntermediateSearch = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
+            int missingAfterIntermediateSearch = mergedHeights.Cast<float>().Count(v => v == RawMissingHeight);
             ThrowIfSourceHiccupLeftMissingSamples(intermediateSearch, IntermediateDemLabel, missingAfterIntermediateSearch);
         }
 
-        int missingAfterIntermediate = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
+        int missingAfterIntermediate = mergedHeights.Cast<float>().Count(v => v == RawMissingHeight);
         if (missingAfterIntermediate > 0 && sourcePolicy.UseFallback)
         {
             WriteLogDetail("Fallback", $"{missingAfterIntermediate:N0} samples unresolved by {IntermediateDemLabel} | trying {FallbackDemLabel} ({FallbackDemDataset})");
             DemWindowSearchResult fallbackSearch = await ReadDemWindowsForDatasetAsync(client, sampleGrid, FallbackDemDataset, failures);
             fallbackSamplesUsed = MergeWindows(fallbackSearch.Windows, mergedHeights);
-            int missingAfterFallbackSearch = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
+            int missingAfterFallbackSearch = mergedHeights.Cast<float>().Count(v => v == RawMissingHeight);
             ThrowIfSourceHiccupLeftMissingSamples(fallbackSearch, FallbackDemLabel, missingAfterFallbackSearch);
         }
 
-        int missingAfterFallback = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
+        int missingAfterFallback = mergedHeights.Cast<float>().Count(v => v == RawMissingHeight);
         if (missingAfterFallback > 0 && sourcePolicy.UseGlobal)
         {
             WriteLogDetail(
@@ -139,7 +139,7 @@ internal static partial class Program
             globalSamplesUsed = MergeWindows(ReadCopernicusDemWindows(sampleGrid, failures), mergedHeights);
         }
 
-        int missingBeforeFill = mergedHeights.Cast<short>().Count(v => v == RawMissingHeight);
+        int missingBeforeFill = mergedHeights.Cast<float>().Count(v => v == RawMissingHeight);
         if (missingBeforeFill == gridWidth * gridHeight)
         {
             throw new InvalidOperationException("GDAL could not read a DEM window from USGS or Copernicus GLO-30. " + string.Join(" | ", failures.Take(6)));
@@ -371,7 +371,7 @@ internal static partial class Program
             using (ds)
             {
                 bool readOk;
-                short[,] heights;
+                float[,] heights;
                 int missing;
                 string failure;
                 try
@@ -552,7 +552,7 @@ internal static partial class Program
             : [];
     }
 
-    private static int MergeWindows(IEnumerable<DemWindow> windows, short[,] mergedHeights)
+    private static int MergeWindows(IEnumerable<DemWindow> windows, float[,] mergedHeights)
     {
         int totalUsed = 0;
         foreach (DemWindow window in windows.OrderByDescending(w => w.ValidSamples))
@@ -560,7 +560,7 @@ internal static partial class Program
             int used = MergeDemWindow(mergedHeights, window.Heights);
             totalUsed += used;
             WriteLogDetail("Mosaic use", $"{used:N0} samples | {window.ProductName}", 4);
-            if (!mergedHeights.Cast<short>().Any(v => v == RawMissingHeight))
+            if (!mergedHeights.Cast<float>().Any(v => v == RawMissingHeight))
             {
                 break;
             }
@@ -587,7 +587,7 @@ internal static partial class Program
         bool fillMissing,
         bool useStandardMetreElevations,
         Action<long> addDataBytes,
-        out short[,] heights,
+        out float[,] heights,
         out int missing,
         out string failure)
     {
@@ -689,7 +689,7 @@ internal static partial class Program
                     continue;
                 }
 
-                heights[y, x] = ClampToInt16Meters(sample);
+                heights[y, x] = (float)sample;
             }
         }
 
@@ -823,14 +823,14 @@ internal static partial class Program
         return false;
     }
 
-    private static short[,] CreateMissingHeightGrid()
+    private static float[,] CreateMissingHeightGrid()
     {
         return CreateMissingHeightGrid(OrtsRawGridSize, OrtsRawGridSize);
     }
 
-    private static short[,] CreateMissingHeightGrid(int width, int height)
+    private static float[,] CreateMissingHeightGrid(int width, int height)
     {
-        short[,] grid = new short[height, width];
+        float[,] grid = new float[height, width];
         for (int y = 0; y < height; y++)
         {
             for (int x = 0; x < width; x++)
@@ -842,7 +842,19 @@ internal static partial class Program
         return grid;
     }
 
-    private static int MergeDemWindow(short[,] target, short[,] source)
+    private static TerrainGridStats GetTerrainGridStats(float[,] heights)
+    {
+        float[] valid = heights.Cast<float>()
+            .Where(height => height != RawMissingHeight)
+            .ToArray();
+        return new TerrainGridStats(
+            valid.Length,
+            heights.Length - valid.Length,
+            valid.Length == 0 ? RawMissingHeight : valid.Min(),
+            valid.Length == 0 ? RawMissingHeight : valid.Max());
+    }
+
+    private static int MergeDemWindow(float[,] target, float[,] source)
     {
         int used = 0;
         int height = Math.Min(target.GetLength(0), source.GetLength(0));
@@ -851,7 +863,7 @@ internal static partial class Program
         {
             for (int x = 0; x < width; x++)
             {
-                short value = source[y, x];
+                float value = source[y, x];
                 if (value == RawMissingHeight)
                 {
                     continue;
@@ -1335,7 +1347,7 @@ internal static partial class Program
             FlushRows(pending.Keys.Select(key => key.Z).Distinct().OrderBy(z => z).ToList());
         }
 
-        private void MergeWithPendingNeighbors((int X, int Z) key, short[,] heights)
+        private void MergeWithPendingNeighbors((int X, int Z) key, float[,] heights)
         {
             if (pending.TryGetValue((key.X - 1, key.Z), out GeneratedTile? west))
             {
@@ -1365,7 +1377,7 @@ internal static partial class Program
                 return;
             }
 
-            Dictionary<(int X, int Z), short[,]> rawWindow = pending.ToDictionary(item => item.Key, item => item.Value.Heights);
+            Dictionary<(int X, int Z), float[,]> rawWindow = pending.ToDictionary(item => item.Key, item => item.Value.Heights);
             MergeSharedCorners(rawWindow);
 
             List<GeneratedTile> windowTiles = pending.Values.ToList();
@@ -1385,11 +1397,11 @@ internal static partial class Program
         }
     }
 
-    private static TerrainSampleEncoding CalculateSampleEncoding(short[,] heights)
+    private static TerrainSampleEncoding CalculateSampleEncoding(float[,] heights)
     {
-        short min = short.MaxValue;
-        short max = short.MinValue;
-        foreach (short height in heights)
+        float min = float.MaxValue;
+        float max = float.MinValue;
+        foreach (float height in heights)
         {
             if (height == RawMissingHeight)
             {
@@ -1400,13 +1412,16 @@ internal static partial class Program
             max = Math.Max(max, height);
         }
 
-        if (min == short.MaxValue)
+        if (min == float.MaxValue)
         {
             return new TerrainSampleEncoding(0, TerrainSampleScale);
         }
 
-        float scale = (float)Math.Max(TerrainSampleScale, (double)(max - min) / (ushort.MaxValue - 1));
-        return new TerrainSampleEncoding(min, scale);
+        float floor = MathF.Floor(min);
+        float scale = (float)Math.Max(
+            TerrainSampleScale,
+            (double)(max - floor) / (ushort.MaxValue - 1));
+        return new TerrainSampleEncoding(floor, scale);
     }
 
     private static void PatchTerrainTileHeights(byte[] tileBytes, float[,] patchHeights, TerrainSampleEncoding encoding)
@@ -1548,7 +1563,7 @@ internal static partial class Program
             : payload;
     }
 
-    private static float AveragePatchHeight(short[,] heights, int patchX, int patchY)
+    private static float AveragePatchHeight(float[,] heights, int patchX, int patchY)
     {
         int blockSize = OrtsRawGridSize / TerrainPatchGridSize;
         int x0 = patchX * blockSize;
@@ -1560,7 +1575,7 @@ internal static partial class Program
         {
             for (int x = x0; x < x0 + blockSize; x++)
             {
-                short value = heights[y, x];
+                float value = heights[y, x];
                 if (value == RawMissingHeight)
                 {
                     continue;
@@ -1574,7 +1589,7 @@ internal static partial class Program
         return count == 0 ? 0 : (float)(sum / count);
     }
 
-    private static void WriteRawGrid(string path, short[,] heights, TerrainSampleEncoding encoding)
+    private static void WriteRawGrid(string path, float[,] heights, TerrainSampleEncoding encoding)
     {
         byte[] bytes = new byte[OrtsRawGridSize * OrtsRawGridSize * sizeof(short)];
         int offset = 0;
@@ -1594,9 +1609,31 @@ internal static partial class Program
         File.WriteAllBytes(path, bytes);
     }
 
-    private static Dictionary<(int X, int Z), short[,]> BuildMergeGridMap(IEnumerable<GeneratedTile> tiles)
+    private static void WriteRawGrid(string path, short[,] heights, TerrainSampleEncoding encoding)
     {
-        Dictionary<(int X, int Z), short[,]> grids = [];
+        byte[] bytes = new byte[OrtsRawGridSize * OrtsRawGridSize * sizeof(ushort)];
+        int offset = 0;
+        for (int y = 0; y < OrtsRawGridSize; y++)
+        {
+            for (int x = 0; x < OrtsRawGridSize; x++)
+            {
+                ushort value = heights[y, x] == RawMissingHeight
+                    ? (ushort)0
+                    : (ushort)Math.Clamp(
+                        (int)Math.Round((heights[y, x] - encoding.Floor) / encoding.Scale, MidpointRounding.AwayFromZero),
+                        0,
+                        ushort.MaxValue - 1);
+                bytes[offset++] = (byte)(value & 0xff);
+                bytes[offset++] = (byte)(value >> 8);
+            }
+        }
+
+        File.WriteAllBytes(path, bytes);
+    }
+
+    private static Dictionary<(int X, int Z), float[,]> BuildMergeGridMap(IEnumerable<GeneratedTile> tiles)
+    {
+        Dictionary<(int X, int Z), float[,]> grids = [];
         foreach (GeneratedTile tile in tiles)
         {
             WorldTile worldTile = tile.Tile.WorldTile
@@ -1627,7 +1664,7 @@ internal static partial class Program
         return patchesByTile;
     }
 
-    private static float[,] BuildPatchHeights(short[,] heights)
+    private static float[,] BuildPatchHeights(float[,] heights)
     {
         float[,] patches = new float[TerrainPatchGridSize, TerrainPatchGridSize];
         for (int patchY = 0; patchY < TerrainPatchGridSize; patchY++)
@@ -1723,11 +1760,11 @@ internal static partial class Program
         refs.Add(new PatchCornerRef(grid, x, y));
     }
 
-    private static short[,] ConvertOneMeterDemToOrtsGrid(float[,] oneMeterGrid, float noDataValue)
+    private static float[,] ConvertOneMeterDemToOrtsGrid(float[,] oneMeterGrid, float noDataValue)
     {
         int demHeight = oneMeterGrid.GetLength(0);
         int demWidth = oneMeterGrid.GetLength(1);
-        short[,] result = new short[OrtsRawGridSize, OrtsRawGridSize];
+        float[,] result = new float[OrtsRawGridSize, OrtsRawGridSize];
 
         for (int y = 0; y < OrtsRawGridSize; y++)
         {
@@ -1746,7 +1783,7 @@ internal static partial class Program
         return result;
     }
 
-    private static short AverageWindow(float[,] grid, float noDataValue, int x0, int y0, int x1, int y1)
+    private static float AverageWindow(float[,] grid, float noDataValue, int x0, int y0, int x1, int y1)
     {
         double sum = 0;
         int count = 0;
@@ -1771,10 +1808,10 @@ internal static partial class Program
             return RawMissingHeight;
         }
 
-        return ClampToInt16Meters(sum / count);
+        return (float)(sum / count);
     }
 
-    private static void FillMissingHeights(short[,] grid)
+    private static void FillMissingHeights(float[,] grid)
     {
         int height = grid.GetLength(0);
         int width = grid.GetLength(1);
@@ -1793,7 +1830,7 @@ internal static partial class Program
                         continue;
                     }
 
-                    if (TryAverageNeighbors(grid, x, y, out short filled))
+                    if (TryAverageNeighbors(grid, x, y, out float filled))
                     {
                         grid[y, x] = filled;
                         changed = true;
@@ -1801,14 +1838,14 @@ internal static partial class Program
                 }
             }
         }
-        while (changed && grid.Cast<short>().Any(v => v == RawMissingHeight));
+        while (changed && grid.Cast<float>().Any(v => v == RawMissingHeight));
     }
 
-    private static bool TryAverageNeighbors(short[,] grid, int x, int y, out short value)
+    private static bool TryAverageNeighbors(float[,] grid, int x, int y, out float value)
     {
         int height = grid.GetLength(0);
         int width = grid.GetLength(1);
-        int sum = 0;
+        double sum = 0;
         int count = 0;
 
         for (int dy = -1; dy <= 1; dy++)
@@ -1832,23 +1869,23 @@ internal static partial class Program
             }
         }
 
-        value = count == 0 ? RawMissingHeight : ClampToInt16Meters((double)sum / count);
+        value = count == 0 ? RawMissingHeight : (float)(sum / count);
         return count > 0;
     }
 
-    private static void MergeSharedEdges(IDictionary<(int X, int Z), short[,]> grids)
+    private static void MergeSharedEdges(IDictionary<(int X, int Z), float[,]> grids)
     {
-        foreach (KeyValuePair<(int X, int Z), short[,]> item in grids)
+        foreach (KeyValuePair<(int X, int Z), float[,]> item in grids)
         {
             (int x, int z) = item.Key;
-            short[,] grid = item.Value;
+            float[,] grid = item.Value;
 
-            if (grids.TryGetValue((x + 1, z), out short[,]? east))
+            if (grids.TryGetValue((x + 1, z), out float[,]? east))
             {
                 AverageVerticalEdge(grid, east);
             }
 
-            if (grids.TryGetValue((x, z + 1), out short[,]? north))
+            if (grids.TryGetValue((x, z + 1), out float[,]? north))
             {
                 AverageHorizontalEdge(grid, north);
             }
@@ -1857,26 +1894,41 @@ internal static partial class Program
         MergeSharedCorners(grids);
     }
 
-    private static void AverageVerticalEdge(short[,] west, short[,] east)
+    private static void AverageVerticalEdge(float[,] west, float[,] east)
     {
         int edge = OrtsRawGridSize - 1;
         for (int y = 0; y < OrtsRawGridSize; y++)
         {
-            short merged = MergeHeights(west[y, edge], east[y, 0]);
+            float merged = MergeHeights(west[y, edge], east[y, 0]);
             west[y, edge] = merged;
             east[y, 0] = merged;
         }
     }
 
-    private static void AverageHorizontalEdge(short[,] south, short[,] north)
+    private static void AverageHorizontalEdge(float[,] south, float[,] north)
     {
         int edge = OrtsRawGridSize - 1;
         for (int x = 0; x < OrtsRawGridSize; x++)
         {
-            short merged = MergeHeights(south[0, x], north[edge, x]);
+            float merged = MergeHeights(south[0, x], north[edge, x]);
             south[0, x] = merged;
             north[edge, x] = merged;
         }
+    }
+
+    private static float MergeHeights(float a, float b)
+    {
+        if (a == RawMissingHeight)
+        {
+            return b;
+        }
+
+        if (b == RawMissingHeight)
+        {
+            return a;
+        }
+
+        return (a + b) / 2.0f;
     }
 
     private static short MergeHeights(short a, short b)
@@ -1894,13 +1946,87 @@ internal static partial class Program
         return ClampToInt16Meters(((double)a + b) / 2.0);
     }
 
-    private static void MergeSharedCorners(IDictionary<(int X, int Z), short[,]> grids)
+    private static void MergeSharedEdges(IDictionary<(int X, int Z), short[,]> grids)
     {
-        Dictionary<(int X, int Z), List<RawCornerRef>> corners = [];
         foreach (KeyValuePair<(int X, int Z), short[,]> item in grids)
         {
             (int x, int z) = item.Key;
             short[,] grid = item.Value;
+            if (grids.TryGetValue((x + 1, z), out short[,]? east))
+            {
+                int edge = grid.GetLength(1) - 1;
+                for (int y = 0; y < grid.GetLength(0); y++)
+                {
+                    short merged = MergeHeights(grid[y, edge], east[y, 0]);
+                    grid[y, edge] = merged;
+                    east[y, 0] = merged;
+                }
+            }
+
+            if (grids.TryGetValue((x, z + 1), out short[,]? north))
+            {
+                int edge = grid.GetLength(0) - 1;
+                for (int xIndex = 0; xIndex < grid.GetLength(1); xIndex++)
+                {
+                    short merged = MergeHeights(grid[0, xIndex], north[edge, xIndex]);
+                    grid[0, xIndex] = merged;
+                    north[edge, xIndex] = merged;
+                }
+            }
+        }
+
+        Dictionary<(int X, int Z), List<(short[,] Grid, int X, int Y)>> corners = [];
+        foreach (KeyValuePair<(int X, int Z), short[,]> item in grids)
+        {
+            int edge = item.Value.GetLength(0) - 1;
+            AddDecodedCorner(corners, item.Key, item.Value, 0, edge);
+            AddDecodedCorner(corners, (item.Key.X + 1, item.Key.Z), item.Value, edge, edge);
+            AddDecodedCorner(corners, (item.Key.X, item.Key.Z + 1), item.Value, 0, 0);
+            AddDecodedCorner(corners, (item.Key.X + 1, item.Key.Z + 1), item.Value, edge, 0);
+        }
+
+        foreach (List<(short[,] Grid, int X, int Y)> refs in corners.Values.Where(refs => refs.Count > 1))
+        {
+            short[] valid = refs
+                .Select(item => item.Grid[item.Y, item.X])
+                .Where(value => value != RawMissingHeight)
+                .ToArray();
+            if (valid.Length == 0)
+            {
+                continue;
+            }
+
+            short merged = ClampToInt16Meters(valid.Average(value => value));
+            foreach ((short[,] grid, int x, int y) in refs)
+            {
+                grid[y, x] = merged;
+            }
+        }
+    }
+
+    private static void AddDecodedCorner(
+        IDictionary<(int X, int Z), List<(short[,] Grid, int X, int Y)>> corners,
+        (int X, int Z) key,
+        short[,] grid,
+        int x,
+        int y)
+    {
+        if (!corners.TryGetValue(key, out List<(short[,] Grid, int X, int Y)>? refs))
+        {
+            refs = [];
+            corners[key] = refs;
+        }
+
+        refs.Add((grid, x, y));
+    }
+
+    private static void MergeSharedCorners(IDictionary<(int X, int Z), float[,]> grids)
+    {
+        Dictionary<(int X, int Z), List<RawCornerRef>> corners = [];
+        foreach (KeyValuePair<(int X, int Z), float[,]> item in grids)
+        {
+            (int x, int z) = item.Key;
+            float[,] grid = item.Value;
             int edge = OrtsRawGridSize - 1;
 
             AddRawCorner(corners, (x, z), grid, 0, edge);
@@ -1911,7 +2037,7 @@ internal static partial class Program
 
         foreach (List<RawCornerRef> refs in corners.Values.Where(r => r.Count > 1))
         {
-            List<short> validHeights = refs
+            List<float> validHeights = refs
                 .Select(r => r.Grid[r.Y, r.X])
                 .Where(h => h != RawMissingHeight)
                 .ToList();
@@ -1921,7 +2047,7 @@ internal static partial class Program
                 continue;
             }
 
-            short merged = ClampToInt16Meters(validHeights.Average(h => h));
+            float merged = validHeights.Average();
             foreach (RawCornerRef cornerRef in refs)
             {
                 cornerRef.Grid[cornerRef.Y, cornerRef.X] = merged;
@@ -1932,7 +2058,7 @@ internal static partial class Program
     private static void AddRawCorner(
         IDictionary<(int X, int Z), List<RawCornerRef>> corners,
         (int X, int Z) key,
-        short[,] grid,
+        float[,] grid,
         int x,
         int y)
     {
@@ -1965,7 +2091,7 @@ internal static partial class Program
     [GeneratedRegex(@"USGS_13_(?<cell>n\d+w\d+)_(?<date>\d{8})\.tif", RegexOptions.IgnoreCase)]
     private static partial Regex OneThirdArcSecondProductRegex();
 
-    private sealed record GeneratedTile(TerrainTile Tile, short[,] Heights);
+    private sealed record GeneratedTile(TerrainTile Tile, float[,] Heights);
 
     private sealed record DecodedRawTile(int X, int Z, short[,] Heights, TerrainSampleEncoding Encoding);
 
@@ -1977,12 +2103,12 @@ internal static partial class Program
         FileInfo TemplateTile,
         string TilePath,
         string HeightPath,
-        short[,] Heights,
+        float[,] Heights,
         int SamplesUsed,
         int GlobalSamplesUsed);
 
     private sealed record TerrainGenerationResult(
-        short[,] Heights,
+        float[,] Heights,
         int PrimarySamplesUsed,
         int IntermediateSamplesUsed,
         int FallbackSamplesUsed,
@@ -1998,7 +2124,7 @@ internal static partial class Program
         double[,] Latitudes,
         (double MinLon, double MinLat, double MaxLon, double MaxLat) BoundingBox);
 
-    private sealed record DemWindow(string ProductName, short[,] Heights, int ValidSamples);
+    private sealed record DemWindow(string ProductName, float[,] Heights, int ValidSamples);
 
     private sealed record DemWindowSearchResult(
         IReadOnlyList<DemWindow> Windows,
@@ -2008,6 +2134,12 @@ internal static partial class Program
     private sealed class RetryableDemSourceException(string message) : InvalidOperationException(message);
 
     private sealed record TerrainSampleEncoding(float Floor, float Scale);
+
+    private sealed record TerrainGridStats(
+        int ValidCount,
+        int MissingCount,
+        float MinHeight,
+        float MaxHeight);
 
     private sealed record RasterElevationTransform(
         double ValueScale,
@@ -2021,7 +2153,7 @@ internal static partial class Program
 
     private sealed record PatchCornerRef(float[,] Grid, int X, int Y);
 
-    private sealed record RawCornerRef(short[,] Grid, int X, int Y);
+    private sealed record RawCornerRef(float[,] Grid, int X, int Y);
 
     // Minimal writer for TSRE's normal and low-terrain index files. Without
     // these indexes, valid tile assets can exist on disk but remain invisible

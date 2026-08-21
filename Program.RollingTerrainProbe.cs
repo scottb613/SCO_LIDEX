@@ -28,6 +28,7 @@ internal static partial class Program
             ProbeRollingCounterContract();
             Console.WriteLine("Rolling terrain probe: PASSED");
             Console.WriteLine("  HD Test 4m writes bounded two-row seam windows");
+            Console.WriteLine("  fractional-metre 4m elevations survive raw-grid encoding");
             Console.WriteLine("  Distant Mountains write bounded two-row seam windows");
             Console.WriteLine("  shared edges/corners and output grid sizes verified");
             Console.WriteLine("  legacy map terrain material resets to terrain.ace");
@@ -50,7 +51,7 @@ internal static partial class Program
                 "rolling probe could not find a normal terrain template");
         const int columns = 3;
         const int rows = 4;
-        Dictionary<(int X, int Z), short[,]> grids = [];
+        Dictionary<(int X, int Z), float[,]> grids = [];
         RollingExperimentalTerrainWriter writer = new(outputDir);
         int sequence = 0;
 
@@ -65,9 +66,9 @@ internal static partial class Program
                 File.WriteAllBytes(
                     tilePath,
                     CreateTerrainTileFromTemplate(template, baseName));
-                short[,] heights = CreateProbeGrid(
+                float[,] heights = CreateProbeGrid(
                     ExperimentalRawGridSize,
-                    (short)(100 + (z * 40) + (x * 7)));
+                    100.25f + (z * 40) + (x * 7));
                 grids[(x, z)] = heights;
                 TerrainTile tile = new(
                     new FileInfo(tilePath),
@@ -91,6 +92,7 @@ internal static partial class Program
         int expectedBytes = ExperimentalRawGridSize *
             ExperimentalRawGridSize * sizeof(short);
         VerifyProbeRawFiles(outputDir, columns * rows, expectedBytes);
+        VerifyFractional4mRawEncoding(outputDir);
     }
 
     private static void ProbeRollingDistantMountainWriter(string outputDir)
@@ -101,7 +103,7 @@ internal static partial class Program
                 "rolling probe could not find a Distant Mountain template");
         const int columns = 3;
         const int rows = 4;
-        Dictionary<(int X, int Z), short[,]> grids = [];
+        Dictionary<(int X, int Z), float[,]> grids = [];
         RollingDistantMountainWriter writer = new();
 
         for (int z = 0; z < rows; z++)
@@ -113,9 +115,9 @@ internal static partial class Program
                     z * LoTileNormalTileSpan);
                 writer.FlushRowsBefore(DistantMountainGridKey(coordinate).Z - 1);
                 string name = LoTileNameFromTileXZ(coordinate.X, coordinate.Z);
-                short[,] heights = CreateProbeGrid(
+                float[,] heights = CreateProbeGrid(
                     LoRawGridSize,
-                    (short)(300 + (z * 40) + (x * 7)));
+                    300.25f + (z * 40) + (x * 7));
                 grids[(x, z)] = heights;
                 writer.Add(new GeneratedLoTile(
                     coordinate,
@@ -143,9 +145,9 @@ internal static partial class Program
         VerifyProbeRawFiles(outputDir, columns * rows, expectedBytes);
     }
 
-    private static short[,] CreateProbeGrid(int gridSize, short height)
+    private static float[,] CreateProbeGrid(int gridSize, float height)
     {
-        short[,] grid = new short[gridSize, gridSize];
+        float[,] grid = new float[gridSize, gridSize];
         for (int y = 0; y < gridSize; y++)
         {
             for (int x = 0; x < gridSize; x++)
@@ -158,13 +160,13 @@ internal static partial class Program
     }
 
     private static void VerifyProbeSeams(
-        IReadOnlyDictionary<(int X, int Z), short[,]> grids,
+        IReadOnlyDictionary<(int X, int Z), float[,]> grids,
         int gridSize)
     {
         int edge = gridSize - 1;
-        foreach (KeyValuePair<(int X, int Z), short[,]> item in grids)
+        foreach (KeyValuePair<(int X, int Z), float[,]> item in grids)
         {
-            if (grids.TryGetValue((item.Key.X + 1, item.Key.Z), out short[,]? east))
+            if (grids.TryGetValue((item.Key.X + 1, item.Key.Z), out float[,]? east))
             {
                 for (int y = 0; y < gridSize; y++)
                 {
@@ -175,7 +177,7 @@ internal static partial class Program
                 }
             }
 
-            if (grids.TryGetValue((item.Key.X, item.Key.Z + 1), out short[,]? north))
+            if (grids.TryGetValue((item.Key.X, item.Key.Z + 1), out float[,]? north))
             {
                 for (int x = 0; x < gridSize; x++)
                 {
@@ -202,6 +204,37 @@ internal static partial class Program
             throw new InvalidOperationException(
                 $"rolling output raw validation failed; count={rawFiles.Length}, " +
                 $"expected={expectedCount}, bytes={expectedBytes}");
+        }
+    }
+
+    private static void VerifyFractional4mRawEncoding(string outputDir)
+    {
+        FileInfo rawFile = new DirectoryInfo(outputDir)
+            .EnumerateFiles("*_y.raw")
+            .OrderBy(file => file.Name, StringComparer.OrdinalIgnoreCase)
+            .First();
+        string tilePath = Path.ChangeExtension(rawFile.FullName[..^"_y.raw".Length], ".t");
+        if (!TryReadTerrainSampleEncoding(tilePath, out TerrainSampleEncoding encoding))
+        {
+            throw new InvalidOperationException("fractional 4m probe could not read terrain sample encoding");
+        }
+
+        byte[] bytes = File.ReadAllBytes(rawFile.FullName);
+        bool foundFractionalElevation = false;
+        for (int offset = 0; offset < bytes.Length; offset += sizeof(ushort))
+        {
+            ushort raw = BitConverter.ToUInt16(bytes, offset);
+            double elevation = encoding.Floor + (raw * encoding.Scale);
+            if (Math.Abs(elevation - Math.Round(elevation)) > 0.01)
+            {
+                foundFractionalElevation = true;
+                break;
+            }
+        }
+
+        if (!foundFractionalElevation)
+        {
+            throw new InvalidOperationException("4m raw encoding rounded every probe elevation to a whole metre");
         }
     }
 

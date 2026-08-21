@@ -304,7 +304,9 @@ HD Test - 4m Tiles:
   spacing. Each completed grid enters a bounded virtual seam mesh and updates
   the live counter. Completed rows are edge/corner merged, written, and released
   continuously; the complete route mesh is never retained in memory. Distant
-  Mountain generation uses the same bounded rolling-row rule.
+  Mountain generation uses the same bounded rolling-row rule. v1.401 preserves
+  fractional-metre source elevations through this complete path and encodes
+  them at 1/256m precision or the smallest wider scale required by the tile.
 
 Scan checks the resolution of every terrain tile on the route, regardless of
 the selected coverage source or Run options. A route may never contain mixed

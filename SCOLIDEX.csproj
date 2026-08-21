@@ -18,11 +18,11 @@
     <Copyright>Copyright (C) Scott Brunner, Beast of Burden</Copyright>
     <Description>SCO LIDEX Terrain Builder for Open Rails and MSTS routes.</Description>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
-    <Version>1.400.0</Version>
-    <InformationalVersion>1.400.0</InformationalVersion>
+    <Version>1.401.0</Version>
+    <InformationalVersion>1.401.0</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <AssemblyVersion>1.400.0.0</AssemblyVersion>
-    <FileVersion>1.400.0.0</FileVersion>
+    <AssemblyVersion>1.401.0.0</AssemblyVersion>
+    <FileVersion>1.401.0.0</FileVersion>
     <ApplicationIcon>SCOtopo.ico</ApplicationIcon>
     <!-- FIX: Force the compiler to build for 64-bit to match GDAL -->
     <PlatformTarget>x64</PlatformTarget>

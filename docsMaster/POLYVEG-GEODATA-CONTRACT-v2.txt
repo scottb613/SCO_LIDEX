@@ -3,7 +3,7 @@ SCO LIDEX / TSRE GenX PolyVeg Geodata Contract v2
 
 Status
 ------
-Development contract for SCO LIDEX v1.400 and TSRE GenX v0.12.
+Development contract for SCO LIDEX v1.401 and TSRE GenX v0.12.
 PolyVeg is the only planting-geodata handoff. There is no legacy forest
 GeoJSON fallback.
 

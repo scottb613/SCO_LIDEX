@@ -75,7 +75,7 @@ internal static partial class Program
         ResetCopernicusDataCounter();
         List<string> failures = [];
         List<DemWindow> windows = ReadCopernicusDemWindows(sampleGrid, failures);
-        short[,] merged = CreateMissingHeightGrid(2, 2);
+        float[,] merged = CreateMissingHeightGrid(2, 2);
         int samples = MergeWindows(windows, merged);
         if (samples == 0)
         {
@@ -88,10 +88,13 @@ internal static partial class Program
             return Task.CompletedTask;
         }
 
-        RawGridStats stats = RawGrid.GetStats(merged);
+        float[] validHeights = merged.Cast<float>()
+            .Where(height => height != RawMissingHeight)
+            .ToArray();
+        int missing = merged.Length - validHeights.Length;
         Console.WriteLine(
-            $"Probe result: PASSED; valid={stats.ValidCount:N0}, missing={stats.MissingCount:N0}, " +
-            $"min={stats.MinHeight}, max={stats.MaxHeight}, data read={FormatCopernicusDataBytesRead()}.");
+            $"Probe result: PASSED; valid={validHeights.Length:N0}, missing={missing:N0}, " +
+            $"min={validHeights.Min():F3}, max={validHeights.Max():F3}, data read={FormatCopernicusDataBytesRead()}.");
         return Task.CompletedTask;
     }
 
@@ -136,7 +139,7 @@ internal static partial class Program
                         fillMissing: false,
                         useStandardMetreElevations: true,
                         AddCopernicusDataBytes,
-                        out short[,] heights,
+                        out float[,] heights,
                         out int missing,
                         out string failure);
                     if (!readOk)

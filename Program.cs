@@ -886,7 +886,7 @@ internal static partial class Program
                         : "STATUS: TILES - US - HIGH RES");
                     rollingWriter?.Add(new GeneratedTile(tile, result.Heights));
                     generatedCount++;
-                    RawGridStats generatedStats = RawGrid.GetStats(result.Heights);
+                    TerrainGridStats generatedStats = GetTerrainGridStats(result.Heights);
                     if (result.PrimarySamplesUsed > 0)
                     {
                         tilesUsingPrimary++;
@@ -939,7 +939,7 @@ internal static partial class Program
                     }
 
                     WriteLogDetail("Source samples used", $"{PrimaryDemLabel}={result.PrimarySamplesUsed:N0}, {IntermediateDemLabel}={result.IntermediateSamplesUsed:N0}, {FallbackDemLabel}={result.FallbackSamplesUsed:N0}, {GlobalDemLabel}={result.GlobalSamplesUsed:N0}, neighbor-fill={result.NeighborFilledSamples:N0}");
-                    WriteLogDetail("Generated grid", $"valid={generatedStats.ValidCount:N0} | missing={generatedStats.MissingCount:N0} | min={generatedStats.MinHeight} | max={generatedStats.MaxHeight}");
+                    WriteLogDetail("Generated grid", $"valid={generatedStats.ValidCount:N0} | missing={generatedStats.MissingCount:N0} | min={generatedStats.MinHeight:F3} | max={generatedStats.MaxHeight:F3}");
                 }
                 catch (Exception ex)
                 {

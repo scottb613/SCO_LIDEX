@@ -192,7 +192,7 @@ internal static partial class Program
         return patched;
     }
 
-    private static void WriteExperimentalRawGrid(string path, short[,] heights, TerrainSampleEncoding encoding)
+    private static void WriteExperimentalRawGrid(string path, float[,] heights, TerrainSampleEncoding encoding)
     {
         int height = heights.GetLength(0);
         int width = heights.GetLength(1);
@@ -220,32 +220,33 @@ internal static partial class Program
         File.WriteAllBytes(path, bytes);
     }
 
-    private static float[,] BuildExperimentalPatchHeights(short[,] heights)
+    private static void WriteExperimentalRawGrid(string path, short[,] heights, TerrainSampleEncoding encoding)
     {
-        float[,] patches = new float[TerrainPatchGridSize, TerrainPatchGridSize];
-        int blockSize = ExperimentalRawGridSize / TerrainPatchGridSize;
-        for (int patchY = 0; patchY < TerrainPatchGridSize; patchY++)
+        int height = heights.GetLength(0);
+        int width = heights.GetLength(1);
+        if (height != ExperimentalRawGridSize || width != ExperimentalRawGridSize)
         {
-            for (int patchX = 0; patchX < TerrainPatchGridSize; patchX++)
+            throw new InvalidOperationException($"HD Test raw grid is {width}x{height}, expected 512x512");
+        }
+
+        byte[] bytes = new byte[width * height * sizeof(ushort)];
+        int offset = 0;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
             {
-                long sum = 0;
-                int count = 0;
-                for (int y = patchY * blockSize; y < (patchY + 1) * blockSize; y++)
-                {
-                    for (int x = patchX * blockSize; x < (patchX + 1) * blockSize; x++)
-                    {
-                        short value = heights[y, x];
-                        if (value != RawMissingHeight)
-                        {
-                            sum += value;
-                            count++;
-                        }
-                    }
-                }
-                patches[patchY, patchX] = count == 0 ? 0 : (float)((double)sum / count);
+                ushort value = heights[y, x] == RawMissingHeight
+                    ? (ushort)0
+                    : (ushort)Math.Clamp(
+                        (int)Math.Round((heights[y, x] - encoding.Floor) / encoding.Scale, MidpointRounding.AwayFromZero),
+                        0,
+                        ushort.MaxValue - 1);
+                bytes[offset++] = (byte)(value & 0xff);
+                bytes[offset++] = (byte)(value >> 8);
             }
         }
-        return patches;
+
+        File.WriteAllBytes(path, bytes);
     }
 
     private static void MergeExperimentalSharedEdges(IDictionary<(int X, int Z), short[,]> grids)
@@ -264,12 +265,98 @@ internal static partial class Program
                     east[y, 0] = merged;
                 }
             }
+
             if (grids.TryGetValue((x, z + 1), out short[,]? north))
+            {
+                int edge = ExperimentalRawGridSize - 1;
+                for (int xIndex = 0; xIndex < ExperimentalRawGridSize; xIndex++)
+                {
+                    short merged = MergeHeights(grid[0, xIndex], north[edge, xIndex]);
+                    grid[0, xIndex] = merged;
+                    north[edge, xIndex] = merged;
+                }
+            }
+        }
+
+        Dictionary<(int X, int Z), List<(short[,] Grid, int X, int Y)>> corners = [];
+        foreach (KeyValuePair<(int X, int Z), short[,]> item in grids)
+        {
+            int edge = ExperimentalRawGridSize - 1;
+            AddDecodedCorner(corners, item.Key, item.Value, 0, edge);
+            AddDecodedCorner(corners, (item.Key.X + 1, item.Key.Z), item.Value, edge, edge);
+            AddDecodedCorner(corners, (item.Key.X, item.Key.Z + 1), item.Value, 0, 0);
+            AddDecodedCorner(corners, (item.Key.X + 1, item.Key.Z + 1), item.Value, edge, 0);
+        }
+
+        foreach (List<(short[,] Grid, int X, int Y)> refs in corners.Values.Where(refs => refs.Count > 1))
+        {
+            short[] valid = refs
+                .Select(item => item.Grid[item.Y, item.X])
+                .Where(value => value != RawMissingHeight)
+                .ToArray();
+            if (valid.Length == 0)
+            {
+                continue;
+            }
+
+            short merged = ClampToInt16Meters(valid.Average(value => value));
+            foreach ((short[,] grid, int x, int y) in refs)
+            {
+                grid[y, x] = merged;
+            }
+        }
+    }
+
+    private static float[,] BuildExperimentalPatchHeights(float[,] heights)
+    {
+        float[,] patches = new float[TerrainPatchGridSize, TerrainPatchGridSize];
+        int blockSize = ExperimentalRawGridSize / TerrainPatchGridSize;
+        for (int patchY = 0; patchY < TerrainPatchGridSize; patchY++)
+        {
+            for (int patchX = 0; patchX < TerrainPatchGridSize; patchX++)
+            {
+                double sum = 0;
+                int count = 0;
+                for (int y = patchY * blockSize; y < (patchY + 1) * blockSize; y++)
+                {
+                    for (int x = patchX * blockSize; x < (patchX + 1) * blockSize; x++)
+                    {
+                        float value = heights[y, x];
+                        if (value != RawMissingHeight)
+                        {
+                            sum += value;
+                            count++;
+                        }
+                    }
+                }
+                patches[patchY, patchX] = count == 0 ? 0 : (float)((double)sum / count);
+            }
+        }
+        return patches;
+    }
+
+    private static void MergeExperimentalSharedEdges(IDictionary<(int X, int Z), float[,]> grids)
+    {
+        foreach (KeyValuePair<(int X, int Z), float[,]> item in grids)
+        {
+            (int x, int z) = item.Key;
+            float[,] grid = item.Value;
+            if (grids.TryGetValue((x + 1, z), out float[,]? east))
+            {
+                int edge = ExperimentalRawGridSize - 1;
+                for (int y = 0; y < ExperimentalRawGridSize; y++)
+                {
+                    float merged = MergeHeights(grid[y, edge], east[y, 0]);
+                    grid[y, edge] = merged;
+                    east[y, 0] = merged;
+                }
+            }
+            if (grids.TryGetValue((x, z + 1), out float[,]? north))
             {
                 int edge = ExperimentalRawGridSize - 1;
                 for (int column = 0; column < ExperimentalRawGridSize; column++)
                 {
-                    short merged = MergeHeights(grid[0, column], north[edge, column]);
+                    float merged = MergeHeights(grid[0, column], north[edge, column]);
                     grid[0, column] = merged;
                     north[edge, column] = merged;
                 }
@@ -277,7 +364,7 @@ internal static partial class Program
         }
 
         Dictionary<(int X, int Z), List<ExperimentalCornerRef>> corners = [];
-        foreach (KeyValuePair<(int X, int Z), short[,]> item in grids)
+        foreach (KeyValuePair<(int X, int Z), float[,]> item in grids)
         {
             (int x, int z) = item.Key;
             int edge = ExperimentalRawGridSize - 1;
@@ -288,12 +375,12 @@ internal static partial class Program
         }
         foreach (List<ExperimentalCornerRef> refs in corners.Values.Where(refs => refs.Count > 1))
         {
-            List<short> valid = refs.Select(item => item.Grid[item.Y, item.X]).Where(value => value != RawMissingHeight).ToList();
+            List<float> valid = refs.Select(item => item.Grid[item.Y, item.X]).Where(value => value != RawMissingHeight).ToList();
             if (valid.Count == 0)
             {
                 continue;
             }
-            short merged = ClampToInt16Meters(valid.Average(value => value));
+            float merged = valid.Average();
             foreach (ExperimentalCornerRef item in refs)
             {
                 item.Grid[item.Y, item.X] = merged;
@@ -304,7 +391,7 @@ internal static partial class Program
     private static void AddExperimentalCorner(
         IDictionary<(int X, int Z), List<ExperimentalCornerRef>> corners,
         (int X, int Z) key,
-        short[,] grid,
+        float[,] grid,
         int x,
         int y)
     {
@@ -316,8 +403,8 @@ internal static partial class Program
         refs.Add(new ExperimentalCornerRef(grid, x, y));
     }
 
-    private sealed record ExperimentalGeneratedTile(TerrainTile Tile, short[,] Heights);
-    private sealed record ExperimentalCornerRef(short[,] Grid, int X, int Y);
+    private sealed record ExperimentalGeneratedTile(TerrainTile Tile, float[,] Heights);
+    private sealed record ExperimentalCornerRef(float[,] Grid, int X, int Y);
 
     private sealed class RollingExperimentalTerrainWriter
     {
@@ -367,7 +454,7 @@ internal static partial class Program
                 .ToList());
         }
 
-        private void MergeWithPendingNeighbors((int X, int Z) key, short[,] heights)
+        private void MergeWithPendingNeighbors((int X, int Z) key, float[,] heights)
         {
             if (pending.TryGetValue((key.X - 1, key.Z), out ExperimentalGeneratedTile? west))
             {
@@ -397,7 +484,7 @@ internal static partial class Program
                 return;
             }
 
-            Dictionary<(int X, int Z), short[,]> rawWindow = pending.ToDictionary(
+            Dictionary<(int X, int Z), float[,]> rawWindow = pending.ToDictionary(
                 item => item.Key, item => item.Value.Heights);
             MergeExperimentalSharedEdges(rawWindow);
 
@@ -432,23 +519,23 @@ internal static partial class Program
             }
         }
 
-        private static void MergeVerticalEdge(short[,] west, short[,] east)
+        private static void MergeVerticalEdge(float[,] west, float[,] east)
         {
             int edge = ExperimentalRawGridSize - 1;
             for (int y = 0; y < ExperimentalRawGridSize; y++)
             {
-                short merged = MergeHeights(west[y, edge], east[y, 0]);
+                float merged = MergeHeights(west[y, edge], east[y, 0]);
                 west[y, edge] = merged;
                 east[y, 0] = merged;
             }
         }
 
-        private static void MergeHorizontalEdge(short[,] south, short[,] north)
+        private static void MergeHorizontalEdge(float[,] south, float[,] north)
         {
             int edge = ExperimentalRawGridSize - 1;
             for (int x = 0; x < ExperimentalRawGridSize; x++)
             {
-                short merged = MergeHeights(south[0, x], north[edge, x]);
+                float merged = MergeHeights(south[0, x], north[edge, x]);
                 south[0, x] = merged;
                 north[edge, x] = merged;
             }

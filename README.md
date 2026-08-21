@@ -4,9 +4,26 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 
 The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v2.txt](docsMaster/POLYVEG-GEODATA-CONTRACT-v2.txt).
 
-> **Current version:** v1.400.
+> **Current version:** v1.401 HOTFIX.
 
 ## Release Highlights
+
+### v1.401 — HOTFIX
+
+- Preserves fractional-metre DEM elevations through normal 8m, HD Test 4m, and
+  Distant Mountain generation instead of rounding every source sample to a
+  whole metre. This removes the visible terracing introduced by v1.400,
+  retains seamless tile edges, and keeps the existing external `_y.raw`
+  terrain format.
+- Adds a focused regression check proving fractional 4m elevations survive
+  raw-grid encoding and that rolling terrain edges and corners remain joined.
+- Tree rows now use the exact `natural=wood` woodland color in map tiles and
+  plantable PolyVeg output; cached derivatives rebuild automatically.
+- Scan and Run logs now use human-readable sections, result-first lines,
+  indented diagnostics, and clearer separation between DEM products while
+  retaining the complete troubleshooting record.
+- Standardizes ownership, copyright, application, and GPL headers across the
+  tracked source and helper files and aligns the compiled application metadata.
 
 ### v1.400 — What's New
 
@@ -122,7 +139,7 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 
 ## Installation
 
-1. Download `SCOLIDEX-v1.400-win-x64.zip` from the [v1.400 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.400).
+1. Download `SCOLIDEX-v1.401-win-x64.zip` from the [v1.401 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.401).
 2. Extract the complete archive to a writable folder.
 3. Run `SCOLIDEX-win-x64\SCOLIDEX.exe`.
 4. Optionally run `AddShortcutDesktop.cmd` from the extracted top-level folder.

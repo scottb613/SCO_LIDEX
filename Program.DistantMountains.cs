@@ -164,15 +164,15 @@ internal static partial class Program
                     $"lat {sampleGrid.BoundingBox.MinLat:F6}..{sampleGrid.BoundingBox.MaxLat:F6}");
 
                 List<string> failures = [];
-                short[,] heights = CreateMissingHeightGrid(LoRawGridSize, LoRawGridSize);
+                float[,] heights = CreateMissingHeightGrid(LoRawGridSize, LoRawGridSize);
                 int globalSamplesUsed = MergeWindows(ReadCopernicusDemWindows(sampleGrid, failures), heights);
 
-                if (globalSamplesUsed == 0 || heights.Cast<short>().All(h => h == RawMissingHeight))
+                if (globalSamplesUsed == 0 || heights.Cast<float>().All(h => h == RawMissingHeight))
                 {
                     throw new InvalidOperationException("no Copernicus GLO-30 DEM samples were read for this lo_tile. " + string.Join(" | ", failures.Take(6)));
                 }
 
-                int missingBeforeFill = heights.Cast<short>().Count(h => h == RawMissingHeight);
+                int missingBeforeFill = heights.Cast<float>().Count(h => h == RawMissingHeight);
                 if (missingBeforeFill > 0)
                 {
                     WriteLogDetail("Neighbor fill", $"{missingBeforeFill:N0} samples remained after Copernicus mosaic");
@@ -270,7 +270,7 @@ internal static partial class Program
                 .ToList());
         }
 
-        private void MergeWithPendingNeighbors((int X, int Z) key, short[,] heights)
+        private void MergeWithPendingNeighbors((int X, int Z) key, float[,] heights)
         {
             if (pending.TryGetValue((key.X - 1, key.Z), out GeneratedLoTile? west))
             {
@@ -300,7 +300,7 @@ internal static partial class Program
                 return;
             }
 
-            Dictionary<(int X, int Z), short[,]> rawWindow = pending.ToDictionary(
+            Dictionary<(int X, int Z), float[,]> rawWindow = pending.ToDictionary(
                 item => item.Key, item => item.Value.Heights);
             MergeSharedEdges(rawWindow);
 
@@ -316,23 +316,23 @@ internal static partial class Program
             }
         }
 
-        private static void MergeLoVerticalEdge(short[,] west, short[,] east)
+        private static void MergeLoVerticalEdge(float[,] west, float[,] east)
         {
             int edge = LoRawGridSize - 1;
             for (int y = 0; y < LoRawGridSize; y++)
             {
-                short merged = MergeHeights(west[y, edge], east[y, 0]);
+                float merged = MergeHeights(west[y, edge], east[y, 0]);
                 west[y, edge] = merged;
                 east[y, 0] = merged;
             }
         }
 
-        private static void MergeLoHorizontalEdge(short[,] south, short[,] north)
+        private static void MergeLoHorizontalEdge(float[,] south, float[,] north)
         {
             int edge = LoRawGridSize - 1;
             for (int x = 0; x < LoRawGridSize; x++)
             {
-                short merged = MergeHeights(south[0, x], north[edge, x]);
+                float merged = MergeHeights(south[0, x], north[edge, x]);
                 south[0, x] = merged;
                 north[edge, x] = merged;
             }
@@ -749,7 +749,7 @@ internal static partial class Program
         return false;
     }
 
-    private static void WriteEncodedHeightGrid(string path, short[,] heights, TerrainSampleEncoding encoding)
+    private static void WriteEncodedHeightGrid(string path, float[,] heights, TerrainSampleEncoding encoding)
     {
         int height = heights.GetLength(0);
         int width = heights.GetLength(1);
@@ -765,6 +765,30 @@ internal static partial class Program
                 byte[] pair = BitConverter.GetBytes(raw);
                 bytes[offset++] = pair[0];
                 bytes[offset++] = pair[1];
+            }
+        }
+
+        File.WriteAllBytes(path, bytes);
+    }
+
+    private static void WriteEncodedHeightGrid(string path, short[,] heights, TerrainSampleEncoding encoding)
+    {
+        int height = heights.GetLength(0);
+        int width = heights.GetLength(1);
+        byte[] bytes = new byte[width * height * sizeof(ushort)];
+        int offset = 0;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                ushort raw = heights[y, x] == RawMissingHeight
+                    ? (ushort)0
+                    : (ushort)Math.Clamp(
+                        (int)Math.Round((heights[y, x] - encoding.Floor) / encoding.Scale, MidpointRounding.AwayFromZero),
+                        0,
+                        ushort.MaxValue - 1);
+                bytes[offset++] = (byte)(raw & 0xff);
+                bytes[offset++] = (byte)(raw >> 8);
             }
         }
 
@@ -910,7 +934,7 @@ internal static partial class Program
     }
 
 
-    private static void WriteLoErrorGrid(string path, short[,] heights)
+    private static void WriteLoErrorGrid(string path, float[,] heights)
     {
         byte[] bytes = new byte[LoRawGridSize * LoRawGridSize * sizeof(float)];
         int offset = 0;
@@ -930,7 +954,7 @@ internal static partial class Program
         File.WriteAllBytes(path, bytes);
     }
 
-    private static void WriteLoNormalGrid(string path, short[,] heights)
+    private static void WriteLoNormalGrid(string path, float[,] heights)
     {
         byte[] bytes = new byte[LoRawGridSize * LoRawGridSize];
         int offset = 0;
@@ -938,11 +962,11 @@ internal static partial class Program
         {
             for (int x = 0; x < LoRawGridSize; x++)
             {
-                int left = heights[y, Math.Max(0, x - 1)] == RawMissingHeight ? heights[y, x] : heights[y, Math.Max(0, x - 1)];
-                int right = heights[y, Math.Min(LoRawGridSize - 1, x + 1)] == RawMissingHeight ? heights[y, x] : heights[y, Math.Min(LoRawGridSize - 1, x + 1)];
-                int down = heights[Math.Min(LoRawGridSize - 1, y + 1), x] == RawMissingHeight ? heights[y, x] : heights[Math.Min(LoRawGridSize - 1, y + 1), x];
-                int up = heights[Math.Max(0, y - 1), x] == RawMissingHeight ? heights[y, x] : heights[Math.Max(0, y - 1), x];
-                int slope = Math.Abs(right - left) + Math.Abs(up - down);
+                float left = heights[y, Math.Max(0, x - 1)] == RawMissingHeight ? heights[y, x] : heights[y, Math.Max(0, x - 1)];
+                float right = heights[y, Math.Min(LoRawGridSize - 1, x + 1)] == RawMissingHeight ? heights[y, x] : heights[y, Math.Min(LoRawGridSize - 1, x + 1)];
+                float down = heights[Math.Min(LoRawGridSize - 1, y + 1), x] == RawMissingHeight ? heights[y, x] : heights[Math.Min(LoRawGridSize - 1, y + 1), x];
+                float up = heights[Math.Max(0, y - 1), x] == RawMissingHeight ? heights[y, x] : heights[Math.Max(0, y - 1), x];
+                int slope = (int)Math.Round(Math.Abs(right - left) + Math.Abs(up - down));
                 bytes[offset++] = (byte)Math.Clamp(192 - slope, 32, 240);
             }
         }
@@ -950,23 +974,23 @@ internal static partial class Program
         File.WriteAllBytes(path, bytes);
     }
 
-    private static float CalculateLocalHeightError(short[,] heights, int x, int y)
+    private static float CalculateLocalHeightError(float[,] heights, int x, int y)
     {
-        short center = heights[y, x];
+        float center = heights[y, x];
         if (center == RawMissingHeight)
         {
             return 0;
         }
 
-        int min = center;
-        int max = center;
+        float min = center;
+        float max = center;
         for (int dy = -1; dy <= 1; dy++)
         {
             int yy = Math.Clamp(y + dy, 0, LoRawGridSize - 1);
             for (int dx = -1; dx <= 1; dx++)
             {
                 int xx = Math.Clamp(x + dx, 0, LoRawGridSize - 1);
-                short value = heights[yy, xx];
+                float value = heights[yy, xx];
                 if (value == RawMissingHeight)
                 {
                     continue;

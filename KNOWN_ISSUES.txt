@@ -5,6 +5,12 @@ SCO LIDEX Known Issues
   before converting it. When Create Route Tiles is selected, read-only Scan
   requires approval before Run rebuilds mismatched tiles into that resolution.
 
+- Some Open Rails unstable builds shade 4m terrain with an 8m normal-spacing
+  assumption. This can create broad false light/dark bands even though the
+  v1.401 terrain geometry and fractional elevations are correct. Standard 8m
+  terrain is unaffected; the remaining 4m lighting correction belongs in Open
+  Rails.
+
 - USGS services may occasionally time out or fail for specific areas. Retry
   later or use the failed-tile list with Use Text File + Append.
 

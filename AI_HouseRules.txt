@@ -10,7 +10,7 @@ Current Repository Baseline
 - Normal development is performed on `work-in-progress`.
 - At a completed release boundary, `master`, `work-in-progress`, and the
   release tag should identify the same reviewed commit.
-- The current public baseline is v1.400. Update this statement when the next
+- The current public baseline is v1.401. Update this statement when the next
   version is formally released.
 
 Supported Build Tools

@@ -1,6 +1,32 @@
 SCO LIDEX Changelog
 ===================
 
+v1.401 HOTFIX
+-------------
+- Preserved fractional-metre DEM elevations from source sampling through
+  fallback mosaics, neighbor fill, rolling seam/corner merging, terrain patch
+  averages, and external `_y.raw` encoding. v1.400 rounded generated elevation
+  samples to whole metres, which produced visible terracing—especially in 4m
+  terrain. Both 8m and 4m output now retain the available source precision.
+- Changed terrain encoding to use a floored sample base and a minimum 1/256m
+  scale, while expanding the selected scale only when a tile's elevation range
+  requires it. Existing decoded short-grid post-processing remains compatible.
+- Added a rolling-terrain regression check that proves fractional 4m elevations
+  survive raw encoding and continues to verify bounded memory, shared edges,
+  shared corners, file sizes, map-material repair, and GUI progress messages.
+- Tree-row map lines and plantable PolyVeg strips now use the exact
+  natural=wood woodland color. Existing cached derivatives are invalidated so
+  reparsing cached route OSM data applies the corrected color.
+- Reworked the Scan, Run, terrain, DEM, Distant Mountain, and final-summary logs
+  around readable uppercase sections, result-first detail lines, deliberate
+  spacing between DEM products, and indentation that preserves full diagnostic
+  detail without timestamping every fast operation. Internal STATUS control
+  tokens remain available to GUI counters without appearing in the human log;
+  Abort now finishes the active unit safely and ends with a clean summary.
+- Standardized ownership and licensing headers across every tracked source and
+  helper script, and added matching author, product description, copyright, and
+  GPL metadata to the compiled application.
+
 v1.400
 ------
 - Corrected DEM handling for the ETRY Kentucky data case. Raster band scale and
