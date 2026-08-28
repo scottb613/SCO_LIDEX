@@ -16,6 +16,13 @@ Corel Auto-Preserve/
 SCOLIDEX-startup-error.txt
 SCOLIDEX.log
 
+# Local/internal notes that must not be published.
+AI_HouseRules.txt
+docsInternal/
+V1.200_DEVELOPMENT_PLAN.md
+OSM_AUTOPAINT_PROPOSAL.md
+SCO_LIDEX_goes_GLOBAL_BBCode.txt
+
 # Local development/reference trees and generated working data.
 .openrails-src/
 .tsre5-src/
