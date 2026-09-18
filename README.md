@@ -10,48 +10,23 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 
 ### v1.500 - Bounded-memory OSM / PolyVeg processing
 
-- Scan checks up to five spread-out locations for normal terrain and separately
-  for Distant Mountains. Coverage at one location remains usable when another
-  sampled location is uncovered or unavailable. DM-only checks use Copernicus.
-- Scan warns about small, remote terrain groups with filenames and coordinates.
-  It does not remove tiles or guarantee coverage everywhere; Run continues to
-  report individual tile failures. Source checks honor cancellation.
-
-- Stages OSM source geometry, permanent exclusions, categorized features, and
-  section fragments in a temporary spatially indexed GeoPackage instead of
-  retaining the complete route in memory.
-- Builds exclusion unions and visible PolyVeg surfaces per terrain section,
-  preserving draw order, vegetation clearance, source identities, and holes.
-  Reassembles and writes one source feature at a time.
-- Streams GeoJSON validation and cache checks one feature at a time, fixing the
-  memory failure while validating large PolyVeg exclusion files.
+- Scan checks up to five spread-out locations for normal terrain and separately for Distant Mountains. Coverage at one location remains usable when another sampled location is uncovered or unavailable. DM-only checks use Copernicus.
+- Scan warns about small, remote terrain groups with filenames and coordinates. It does not remove tiles or guarantee coverage everywhere; Run continues to report individual tile failures. Source checks honor cancellation.
+- Stages OSM source geometry, permanent exclusions, categorized features, and section fragments in a temporary spatially indexed GeoPackage instead of retaining the complete route in memory.
+- Builds exclusion unions and visible PolyVeg surfaces per terrain section, preserving draw order, vegetation clearance, source identities, and holes. Reassembles and writes one source feature at a time.
+- Streams GeoJSON validation and cache checks one feature at a time, fixing the memory failure while validating large PolyVeg exclusion files.
 - Loads map geometry per tile with at most two concurrent renders.
-- Skips empty or negligible-area PolyVeg features after checking their exported
-  coordinates, logging source IDs, categories, areas, and a skipped-feature total.
-- Adds CPU and RAM details to settings logs and current/peak process memory to
-  run summaries. Failure and cancellation reports retain stage, source, output,
-  exception, and stack-trace details; failures include bounded read-only storage
-  checks to help diagnose route or disk problems.
-- Retains the four-file PolyVeg handoff and validates all outputs before
-  promotion. Temporary staging requires free disk space in route osm_data and
-  is removed on completion, cancellation, or a handled failure.
+- Skips empty or negligible-area PolyVeg features after checking their exported coordinates, logging source IDs, categories, areas, and a skipped-feature total.
+- Adds CPU and RAM details to settings logs and current/peak process memory to run summaries. Failure and cancellation reports retain stage, source, output, exception, and stack-trace details; failures include bounded read-only storage checks to help diagnose route or disk problems.
+- Retains the four-file PolyVeg handoff and validates all outputs before promotion. Temporary staging requires free disk space in route osm_data and is removed on completion, cancellation, or a handled failure.
 
 ### v1.401 — HOTFIX
 
-- Preserves fractional-metre DEM elevations through normal 8m, HD Test 4m, and
-  Distant Mountain generation instead of rounding every source sample to a
-  whole metre. This removes the visible terracing introduced by v1.400,
-  retains seamless tile edges, and keeps the existing external `_y.raw`
-  terrain format.
-- Adds a focused regression check proving fractional 4m elevations survive
-  raw-grid encoding and that rolling terrain edges and corners remain joined.
-- Tree rows now use the exact `natural=wood` woodland color in map tiles and
-  plantable PolyVeg output; cached derivatives rebuild automatically.
-- Scan and Run logs now use human-readable sections, result-first lines,
-  indented diagnostics, and clearer separation between DEM products while
-  retaining the complete troubleshooting record.
-- Standardizes ownership, copyright, application, and GPL headers across the
-  tracked source and helper files and aligns the compiled application metadata.
+- Preserves fractional-metre DEM elevations through normal 8m, HD Test 4m, and Distant Mountain generation instead of rounding every source sample to a whole metre. This removes the visible terracing introduced by v1.400, retains seamless tile edges, and keeps the existing external `_y.raw` terrain format.
+- Adds a focused regression check proving fractional 4m elevations survive raw-grid encoding and that rolling terrain edges and corners remain joined.
+- Tree rows now use the exact `natural=wood` woodland color in map tiles and plantable PolyVeg output; cached derivatives rebuild automatically.
+- Scan and Run logs now use human-readable sections, result-first lines, indented diagnostics, and clearer separation between DEM products while retaining the complete troubleshooting record.
+- Standardizes ownership, copyright, application, and GPL headers across the tracked source and helper files and aligns the compiled application metadata.
 
 ### v1.400 — What's New
 
