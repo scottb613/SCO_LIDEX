@@ -38,6 +38,13 @@ internal static partial class Program
         TerrainOutputResolution terrainResolution)
     {
         WriteLogSection("Route Summary");
+        foreach (string skipped in route.SkippedInvalidFiles)
+        {
+            RecordTileException();
+            WriteLogDetail("Tile exception - skipped", skipped);
+        }
+        foreach (string skipped in route.SkippedOriginFiles)
+            WriteLogDetail("Skipped null/origin file", $"{skipped} | X=0, Z=0; excluded from terrain, DM and map coverage; file left unchanged");
         WriteLogDetail("Route", route.RouteDir);
         WriteLogDetail("Terrain tiles", $"{route.TerrainTiles.Count:N0}");
         WriteLogDetail("World files", $"{route.WorldTiles.Count:N0}");

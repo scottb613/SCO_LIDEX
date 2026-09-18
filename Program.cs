@@ -181,6 +181,11 @@ internal static partial class Program
     private static async Task RunCommandLineAsync(string[] args)
     {
         AttachConsoleForCommandLine();
+        if (args.Contains("--geofabrik-selection-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunGeofabrikSelectionProbe(args);
+            return;
+        }
         if (args.Contains("--failure-diagnostics-probe", StringComparer.OrdinalIgnoreCase))
         {
             RunFailureDiagnosticsProbe();
@@ -456,6 +461,7 @@ internal static partial class Program
     // redirects Console output into the log window, and lets this engine run.
     internal static async Task RunConsoleAsync(string[] args, CancellationToken cancellationToken)
     {
+        Interlocked.Exchange(ref operationTileExceptions, 0);
         WriteLogBanner("SCO LIDEX TERRAIN RUN");
 
         bool overwriteFlag = args.Contains("--overwrite", StringComparer.OrdinalIgnoreCase);
@@ -599,19 +605,6 @@ internal static partial class Program
         {
             TerrainResolutionInspection resolutionInspection =
                 InspectTerrainResolutions(routeDir, requestedTerrainResolution);
-            if (resolutionInspection.UnrecognizedTiles.Count > 0)
-            {
-                Console.WriteLine(
-                    $"Error: {resolutionInspection.UnrecognizedTiles.Count:N0} terrain tile(s) " +
-                    "have an unreadable or unknown resolution; Run stopped before terrain writes.");
-                foreach (TerrainResolutionIssue issue in resolutionInspection.UnrecognizedTiles.Take(40))
-                {
-                    Console.WriteLine($"  {issue.TileName}: {issue.Detail}");
-                }
-
-                return;
-            }
-
             if (resolutionInspection.MismatchedTiles.Count > 0)
             {
                 if (!forceTerrainResolution)
@@ -726,6 +719,8 @@ internal static partial class Program
         SortedSet<string> retryableFailedNormalTileNames = new(StringComparer.OrdinalIgnoreCase);
         SortedSet<string> unmappableFailedNormalTileNames = new(StringComparer.OrdinalIgnoreCase);
         IReadOnlyList<TerrainTile> processingTiles = GetRouteTileProcessingList(route!, markerCoverage, trackDatabaseCoverage, kmlCoverage, textFileCoverage, terrainRadius);
+        if (createRouteTiles)
+            processingTiles = FilterReadableTerrainTiles(route!, processingTiles, requestedTerrainResolution);
         int totalTiles = createRouteTiles ? processingTiles.Count : 0;
 
         if (experimental4mTest)
@@ -830,7 +825,7 @@ internal static partial class Program
                 }
             }
 
-            Console.WriteLine("STATUS: OPERATION COMPLETE");
+            WriteOperationCompletion();
             return;
         }
 
@@ -978,8 +973,9 @@ internal static partial class Program
                     WriteLogDetail("Source samples used", $"{PrimaryDemLabel}={result.PrimarySamplesUsed:N0}, {IntermediateDemLabel}={result.IntermediateSamplesUsed:N0}, {FallbackDemLabel}={result.FallbackSamplesUsed:N0}, {GlobalDemLabel}={result.GlobalSamplesUsed:N0}, neighbor-fill={result.NeighborFilledSamples:N0}");
                     WriteLogDetail("Generated grid", $"valid={generatedStats.ValidCount:N0} | missing={generatedStats.MissingCount:N0} | min={generatedStats.MinHeight:F3} | max={generatedStats.MaxHeight:F3}");
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (!IsOperationWideFailure(ex))
                 {
+                    RecordTileException();
                     WriteFailureDiagnostics($"Terrain generation failed: {tile.TileFile.FullName}", ex);
                     failed++;
                     retryableFailedNormalTileNames.Add(GetTerrainTileBaseName(tile));
@@ -1025,9 +1021,8 @@ internal static partial class Program
             Console.WriteLine($"  TERRAIN DONE. Generated={generatedCount:N0}, skipped={skipped:N0}, failed={failed:N0}, total={totalTiles:N0}.");
             PrintFailedTileTextFileBlock(retryableFailedNormalTileNames);
             PrintUnmappableTileBlock(unmappableFailedNormalTileNames);
-            Console.WriteLine("Terrain stage contains failures. DM and map stages were not started; fix the error or run Append first.");
+            Console.WriteLine("Terrain completed with tile exceptions; continuing with remaining selected stages. See failed tile list above.");
             Console.WriteLine("STATUS: FAILURE - TILES");
-            return;
         }
 
         if (createRouteTiles && !inspectOnly &&
@@ -1057,9 +1052,8 @@ internal static partial class Program
 
             if (dmFailures > 0)
             {
-                Console.WriteLine("Distant Mountain stage contains failures. Map generation was not started; fix the error or run Append first.");
+                Console.WriteLine("Distant Mountains completed with tile exceptions; continuing to maps. See failed tiles above.");
                 Console.WriteLine("STATUS: FAILURE - DM");
-                return;
             }
 
             Console.WriteLine("STATUS: DM - COMPLETE");
@@ -1104,7 +1098,7 @@ internal static partial class Program
             WriteLogDetail("Source use summary", $"tiles using {PrimaryDemLabel}={tilesUsingPrimary:N0}, {IntermediateDemLabel}={tilesUsingIntermediate:N0}, {FallbackDemLabel}={tilesUsingFallback:N0}, {GlobalDemLabel}={tilesUsingGlobal:N0}");
         }
 
-        Console.WriteLine("STATUS: OPERATION COMPLETE");
+        WriteOperationCompletion();
     }
 
     // Read-only preflight. This validates the selected route/tile set and checks
@@ -1118,6 +1112,7 @@ internal static partial class Program
         int unreadableRouteTiles = 0;
         int unreadableDmTiles = 0;
         SortedSet<string> invalidTiles = new(StringComparer.OrdinalIgnoreCase);
+        int skippedBadTerrain = 0;
 
         if (!RouteLayout.TryLoad(routeDir, out RouteLayout? route, out string routeError))
         {
@@ -1162,15 +1157,6 @@ internal static partial class Program
                 }
             }
 
-            if (resolutionInspection.UnrecognizedTiles.Count > 0)
-            {
-                WriteLogDetail("Unrecognized tiles", $"{resolutionInspection.UnrecognizedTiles.Count:N0}");
-                foreach (TerrainResolutionIssue issue in resolutionInspection.UnrecognizedTiles)
-                {
-                    invalidTiles.Add($"{issue.TileName} ({issue.Detail})");
-                }
-            }
-
             if (invalidTiles.Count > 0)
             {
                 blockingFailure = true;
@@ -1212,6 +1198,12 @@ internal static partial class Program
             if (createsSelectionCoverage && options.CreateRouteTiles)
             {
                 WriteLogDetail("Plan", "Run will create and index any missing selected base terrain tiles");
+            }
+            if (options.CreateRouteTiles)
+            {
+                int before = processingTiles.Count;
+                processingTiles = FilterReadableTerrainTiles(route!, processingTiles, requestedResolution);
+                skippedBadTerrain = before - processingTiles.Count;
             }
             int expectedGridSize = options.Hd4mOutput
                 ? ExperimentalRawGridSize
@@ -1388,7 +1380,7 @@ internal static partial class Program
             blockingFailure = true;
         }
 
-        bool hasWarnings = false;
+        bool hasWarnings = skippedBadTerrain > 0 || route!.SkippedInvalidFiles.Count > 0;
         DemSourcePolicy demSources = DemSourcePolicy.None;
         bool routeCanRun = false;
         bool distantMountainCanRun = false;
@@ -1408,6 +1400,7 @@ internal static partial class Program
         {
             PrintProjectionSummary(mapper);
             hasWarnings |= WarnAboutIsolatedRouteTiles(route!, mapper);
+            hasWarnings |= WriteRouteFileDiagnostics(route!, mapper);
             if (options.CreateMapTiles)
             {
                 try
@@ -1513,6 +1506,16 @@ internal static partial class Program
         string result = blockingFailure ? "FAILED" : hasWarnings ? "PASSED WITH WARNINGS" : "PASSED";
         WriteLogSection("Scan Result");
         WriteLogDetail("Result", result);
+        WriteLogDetail("Tile exceptions skipped", (skippedBadTerrain + route!.SkippedInvalidFiles.Count).ToString());
+        if (invalidTiles.Count > 0)
+        {
+            WriteLogDetail("Blocking terrain files", invalidTiles.Count.ToString());
+            foreach (string invalid in invalidTiles) WriteLogDetail("File / reason", invalid, 4);
+        }
+        if (options.CreateMapTiles && !mapSource.CanRun)
+            WriteLogDetail("Map stage unavailable", mapSource.Detail);
+        if (blockingFailure)
+            WriteLogDetail("Next step", "Review the Error and File / reason entries above in a TEST COPY; do not delete files based only on geographic warnings.");
         return new ScanSummary(
             !blockingFailure,
             options.CreateRouteTiles ? processingTiles.Count : 0,

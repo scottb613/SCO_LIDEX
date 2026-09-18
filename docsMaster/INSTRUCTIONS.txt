@@ -599,3 +599,14 @@ PolyVeg export skips empty or negligible-area features after checking the exact
 exported coordinates. The log identifies each skipped source, category, and
 area, followed by a skipped-feature total. Other validation errors still stop
 promotion so the previous four-file handoff remains available.
+
+Hotfix behavior (v1.501)
+-----------------------
+Scan and Run use a covering set of regional map extracts. Inspect the source
+plan and download sizes in the log. Local routes will stop map selection if
+only an oversized extract can cover the requested points.
+Null/origin files at X=0, Z=0 are skipped and preserved. Unreadable terrain
+tiles are logged and skipped; recoverable runtime tile failures do not prevent
+valid tiles and independent later stages from running. Review all skipped and
+failed filenames: completion with tile exceptions is not a complete rebuild.
+Cancellation, storage failures, and valid mixed resolutions retain safeguards.

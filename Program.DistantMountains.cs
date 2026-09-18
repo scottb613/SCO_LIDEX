@@ -186,8 +186,9 @@ internal static partial class Program
                 built++;
                 Console.WriteLine($"  PREPARED TSRE-style lo_tile with {GlobalDemLabel}={globalSamplesUsed:N0}, neighbor-fill={missingBeforeFill:N0} samples.");
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!IsOperationWideFailure(ex))
             {
+                RecordTileException();
                 WriteFailureDiagnostics("Distant Mountain failure", ex);
                 failed++;
                 MarkDistantMountainTileForAppendRetry(tilePath, heightPath);
@@ -203,7 +204,7 @@ internal static partial class Program
         {
             WriteFailureDiagnostics("Distant Mountain failure", ex);
             Console.WriteLine($"Distant Mountain rolling write failed: {ex.Message}");
-            failed++;
+            throw;
         }
 
         WriteLogSubsection("Distant Mountain Output");

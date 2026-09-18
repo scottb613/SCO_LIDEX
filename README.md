@@ -4,9 +4,16 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 
 The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v2.txt](docsMaster/POLYVEG-GEODATA-CONTRACT-v2.txt).
 
-> **Current version:** v1.500.
+> **Current version:** v1.501.
 
 ## Release Highlights
+
+### v1.501 — HOTFIX
+
+- Combines regional Geofabrik extracts for cross-border routes instead of requiring a single covering extract. Local routes cannot silently fall back to an oversized continent-scale download; logs list the source plan and download sizes.
+- Skips null/origin terrain and world files at X=0, Z=0 before coverage checks, logs each exclusion, and leaves the files untouched. Zero elevation is not an exclusion rule.
+- Reports unreadable terrain and recoverable tile failures, preserves affected files, and continues with usable tiles and independent stages. Cancellation, storage failures, and incompatible valid terrain resolutions retain their safeguards.
+- Improves route-file diagnostics and completion reporting, validates all inputs to multi-source caches, and preserves the original error if temporary map-file cleanup fails.
 
 ### v1.500 - Bounded-memory OSM / PolyVeg processing
 
@@ -142,7 +149,7 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 
 ## Installation
 
-1. Download `SCOLIDEX-v1.500-win-x64.zip` from the [v1.500 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.500).
+1. Download `SCOLIDEX-v1.501-win-x64.zip` from the [v1.501 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.501).
 2. Extract the complete archive to a writable folder.
 3. Run `SCOLIDEX-win-x64\SCOLIDEX.exe`.
 4. Optionally run `AddShortcutDesktop.cmd` from the extracted top-level folder.

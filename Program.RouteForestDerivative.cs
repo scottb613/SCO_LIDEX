@@ -1503,10 +1503,22 @@ internal static partial class Program
             File.WriteAllBytes(Path.Combine(tilesDirectory, RouteLayout.TileNameFromTileXZ(tileX, tileZ) + ".t"), [0]);
             File.WriteAllBytes(Path.Combine(tilesDirectory, RouteLayout.TileNameFromTileXZ(terrainOnlyTileX, tileZ) + ".t"), [0]);
             File.WriteAllText(Path.Combine(worldDirectory, WorldFileName(tileX, tileZ)), "SIMISA@@@@@@@@@@JINX0w0t______");
+            string originTerrain = Path.Combine(tilesDirectory, RouteLayout.TileNameFromTileXZ(0, 0) + ".t");
+            string originWorld = Path.Combine(worldDirectory, WorldFileName(0, 0));
+            File.WriteAllBytes(originTerrain, []);
+            File.WriteAllBytes(originWorld, []);
             if (!RouteLayout.TryLoad(routeDirectory, out RouteLayout? route, out string error) || route is null)
             {
                 throw new InvalidOperationException("could not construct derivative probe route: " + error);
             }
+            if (route.SkippedOriginFiles.Count != 2 || !File.Exists(originTerrain) || !File.Exists(originWorld))
+                throw new InvalidDataException("Null/origin files were not explicitly skipped and preserved");
+            string unrecognizedWorld = Path.Combine(worldDirectory, "unrecognized.w");
+            File.WriteAllText(unrecognizedWorld, "placeholder");
+            var diagnosticFindings = InspectRouteFileDiagnostics(route);
+            if (!diagnosticFindings.Any(finding => finding.Path == unrecognizedWorld) ||
+                diagnosticFindings.Any(finding => finding.Path == originWorld))
+                throw new InvalidDataException("World filename diagnostics confused malformed names with skipped origin files");
             IReadOnlyList<WorldTile> routeCoverage = GetRouteCoverageTiles(route);
             if (route.WorldTiles.Count != 1 || route.TerrainTiles.Count != 2 || routeCoverage.Count != 2 ||
                 !routeCoverage.Any(tile => tile.X == terrainOnlyTileX && tile.Z == tileZ))
@@ -1533,6 +1545,30 @@ internal static partial class Program
             {
                 throw new InvalidDataException("current compact route OSM cache was not reusable");
             }
+            // Overlapping extracts must merge once and retain every source stamp.
+            long CountFeatures(string path)
+            {
+                using DataSource data = Ogr.Open(path, 0)!;
+                long count = 0;
+                for (int i = 0; i < data.GetLayerCount(); i++)
+                {
+                    using Layer layer = data.GetLayerByIndex(i);
+                    count += layer.GetFeatureCount(1);
+                }
+                return count;
+            }
+            long singleSourceCount = CountFeatures(compactSourcePath);
+            string secondSource = Path.Combine(root, "synthetic-second-source.gpkg");
+            File.Copy(sourcePath, secondSource);
+            BuildRouteOsmWorkingCacheFromSources(route, mapper, [sourcePath, secondSource], CancellationToken.None);
+            if (CountFeatures(compactSourcePath) != singleSourceCount ||
+                FindCurrentRouteOsmWorkingCacheSet(route, [sourcePath, secondSource]) is null ||
+                FindCurrentRouteOsmWorkingCacheSet(route, [sourcePath]) is not null)
+                throw new InvalidDataException("Multi-source deduplication or source-set validation failed");
+            File.SetLastWriteTimeUtc(secondSource, File.GetLastWriteTimeUtc(secondSource).AddSeconds(5));
+            if (FindCurrentRouteOsmWorkingCacheSet(route, [sourcePath, secondSource]) is not null)
+                throw new InvalidDataException("Changed secondary source did not invalidate compact cache");
+            BuildRouteOsmWorkingCacheFromSources(route, mapper, [sourcePath], CancellationToken.None);
             using JsonDocument compactManifest = JsonDocument.Parse(File.ReadAllText(
                 Path.Combine(GetRouteOsmDirectory(routeDirectory), RouteOsmWorkingManifestFileName)));
             if (compactManifest.RootElement.GetProperty("SchemaVersion").GetInt32() != 4 ||

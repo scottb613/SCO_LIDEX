@@ -1492,33 +1492,12 @@ internal sealed partial class TopoForm : Form
             return false;
         }
 
-        if (inspection.UnrecognizedTiles.Count > 0)
-        {
-            string details = string.Join(
-                Environment.NewLine,
-                inspection.UnrecognizedTiles.Take(12)
-                    .Select(tile => $"  • {tile.TileName}: {tile.Detail}"));
-            string remainder = inspection.UnrecognizedTiles.Count > 12
-                ? $"{Environment.NewLine}  • ...and {inspection.UnrecognizedTiles.Count - 12:N0} more"
-                : "";
-            StyledMessageDialog.Show(
-                this,
-                $"LIDEX cannot safely determine the resolution of " +
-                $"{inspection.UnrecognizedTiles.Count:N0} terrain tile(s):\n\n" +
-                details + remainder + "\n\nRepair or replace these tiles before Scan. " +
-                "No files were changed.",
-                "SCO LIDEX - Terrain Resolution Stopped",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-            return false;
-        }
-
         string selectedLabel = Program.TerrainOutputLabel(selectedResolution);
         if (inspection.MismatchedTiles.Count == 0)
         {
             terrainResolutionForceApproved = false;
             logEntry =
-                $"Terrain resolution preflight: {inspection.MatchingTiles:N0} route tile(s) match {selectedLabel}." +
+                $"Terrain resolution preflight: {inspection.MatchingTiles:N0} route tile(s) match {selectedLabel}; {inspection.UnrecognizedTiles.Count:N0} unreadable tile(s) will be reported and skipped." +
                 Environment.NewLine + Environment.NewLine;
             return true;
         }
@@ -1779,7 +1758,7 @@ internal sealed partial class TopoForm : Form
             SetRunning(false);
             if (!operationFailed)
             {
-                SetOperationMessage("OPERATION COMPLETE");
+                SetOperationMessage(Program.HadTileExceptions ? "OPERATION COMPLETE - TILE EXCEPTIONS" : "OPERATION COMPLETE");
             }
         }
     }

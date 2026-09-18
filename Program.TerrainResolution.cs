@@ -166,12 +166,11 @@ internal static partial class Program
     {
         TerrainResolutionInspection inspection = InspectTerrainResolutions(
             routeDir, expectedResolution);
-        if (inspection.MismatchedTiles.Count == 0 &&
-            inspection.UnrecognizedTiles.Count == 0)
+        if (inspection.MismatchedTiles.Count == 0 && inspection.MatchingTiles > 0)
         {
             Console.WriteLine(
-                $"Terrain resolution validation: {inspection.TotalTiles:N0} / " +
-                $"{inspection.TotalTiles:N0} tile(s) are {TerrainOutputLabel(expectedResolution)}.");
+                $"Terrain resolution validation: {inspection.MatchingTiles:N0} readable tile(s) are {TerrainOutputLabel(expectedResolution)}; " +
+                $"{inspection.UnrecognizedTiles.Count:N0} unreadable tile exception(s) excluded.");
             return true;
         }
 
@@ -267,6 +266,19 @@ internal static partial class Program
                     "8m-to-4m forced conversion did not produce a clean uniform route");
             }
 
+            string brokenPath = Path.Combine(tilesDir, RouteLayout.TileNameFromTileXZ(-12000, 14000) + ".t");
+            File.WriteAllBytes(brokenPath, [0, 1, 2]);
+            if (!RouteLayout.TryLoad(probeRoot, out RouteLayout? partialRoute, out string partialError) || partialRoute is null)
+                throw new InvalidDataException(partialError);
+            var usableTiles = FilterReadableTerrainTiles(partialRoute, partialRoute.TerrainTiles, TerrainOutputResolution.HdTest4m);
+            if (usableTiles.Count != 2 || usableTiles.Any(tile => tile.TileFile.FullName == brokenPath) ||
+                !File.ReadAllBytes(brokenPath).SequenceEqual(new byte[] { 0, 1, 2 }) ||
+                !VerifyUniformTerrainResolution(probeRoot, TerrainOutputResolution.HdTest4m))
+                throw new InvalidDataException("Corrupt tile prevented valid terrain from continuing or was modified");
+            if (!IsOperationWideFailure(new IOException("output storage failure")) ||
+                !IsOperationWideFailure(new OperationCanceledException()) ||
+                IsOperationWideFailure(new InvalidDataException("bad tile")))
+                throw new InvalidDataException("Tile versus operation failure classification failed");
             Console.WriteLine("Terrain resolution probe: PASSED");
             Console.WriteLine("  mixed 8m/4m route detected");
             Console.WriteLine("  4m-to-8m forced conversion verified");

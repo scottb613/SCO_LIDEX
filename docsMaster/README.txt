@@ -10,10 +10,22 @@ and writes terrain back into an existing route.
 The exact planting handoff is documented in
 docsMaster\POLYVEG-GEODATA-CONTRACT-v2.txt.
 
-Current version: v1.500.
+Current version: v1.501.
 
 Release highlights
 ==================
+
+v1.501 - HOTFIX
+---------------
+
+- Combines regional Geofabrik extracts across borders and prevents oversized
+  continental fallbacks for local routes. Logs sources and download sizes.
+- Skips null/origin terrain and world files at X=0, Z=0, preserving the files.
+  Zero elevation is not an exclusion rule.
+- Reports unreadable terrain and recoverable tile failures, continuing with
+  usable tiles and independent stages. Operation-wide failures still stop.
+- Improves diagnostics, completion reporting, multi-source cache validation,
+  and temporary map-file cleanup without hiding the original failure.
 
 v1.500 - Bounded-memory OSM / PolyVeg processing
 ----------------------------------------------
@@ -268,7 +280,7 @@ v1.100 - Additional work
 Installation
 ============
 
-1. Download SCOLIDEX-v1.500-win-x64.zip from the GitHub release.
+1. Download SCOLIDEX-v1.501-win-x64.zip from the GitHub release.
 2. Extract the complete archive to a writable folder.
 3. Run SCOLIDEX-win-x64\SCOLIDEX.exe.
 4. Optionally run AddShortcutDesktop.cmd from the extracted top-level folder.

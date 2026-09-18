@@ -1,6 +1,28 @@
 SCO LIDEX Changelog
 ===================
 
+v1.501 - HOTFIX
+---------------
+- Unreadable terrain-resolution tiles are reported and skipped instead of
+  blocking Scan/Run. Local terrain/DM failures no longer suppress later stages.
+  Malformed map-tile geometry is reported per tile while other maps continue.
+  Cancellation and storage-wide errors still stop; mixed valid resolutions
+  retain the existing explicit conversion requirement.
+
+- Null/origin terrain and world files at X=0, Z=0 are excluded during route
+  loading before coverage and resolution checks; paths and exclusion reasons
+  are logged. Files are preserved; zero elevation is not an exclusion rule.
+- Scan reports isolated/zero-byte files and unrecognized world filenames,
+  boundary files on map-source failure, and blocking terrain reasons again
+  in the final Scan Result.
+
+- Scan and Run now select a covering set of regional OSM extracts, including
+  cross-border routes, instead of requiring one covering continent-sized PBF.
+- Local footprints under 100 square degrees reject extract envelopes over
+  1,000 square degrees; missing regional coverage stops before download.
+- Logs list every selected extract and its planned download bytes. Compact
+  cache reuse validates the complete source set, including secondary inputs.
+
 v1.500
 ------
 

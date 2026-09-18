@@ -138,28 +138,21 @@ internal static partial class Program
 
             using HttpClient client = CreateMapHttpClient(TimeSpan.FromSeconds(45));
             IReadOnlyList<(double Lon, double Lat)> coveragePoints = GetMapAndRouteCoveragePoints(mapper, selectedTiles, route.WorldTiles);
-            GeofabrikResolution resolution = await ResolveGeofabrikRegionAsync(
+            GeofabrikSourceSet sources = await ResolveGeofabrikSourceSetAsync(
                 client, route.RouteDir, mapper, coveragePoints, cacheOnly: false, cancellationToken);
-            GeofabrikRegion region = resolution.Region;
-            Console.WriteLine($"Map tiles: enabled; {MapImageSize}x{MapImageSize} image per normal 2048 m terrain tile.");
-            Console.WriteLine($"Map source: Geofabrik {region.Name} ({region.Id}), anonymous regional OpenStreetMap PBF.");
-            Console.WriteLine(resolution.CachedExtractAvailable
-                ? $"Map extract: existing route cache selected ({resolution.CachedExtractPath}); remote download not needed."
-                : resolution.RemoteExtractAvailable
-                    ? $"Map extract: remote available{FormatModified(region.Modified)}."
-                    : $"Map extract: FAILED ({resolution.Detail}).");
-            Console.WriteLine("Map alignment: each OSM vertex uses the same corrected terrain projection and tile-local meter frame as DEM sampling.");
-            Console.WriteLine("Map output: TSRE F3 terrain_maps/<tile-hash>.png cache; terrain .t materials and UVs remain unchanged.");
-            Console.WriteLine("Map runtime: bundled GDAL OSM/PBF driver available; no external route-editor or MSTS utility required.");
+            LogGeofabrikSourcePlan(sources);
             return new MapSourceAvailability(
-                resolution.CanRun,
-                resolution.CacheOnly,
-                HasMapSourceWarning(resolution),
-                resolution.Detail);
+                sources.Sources.Count > 0 && sources.Sources.All(source => source.CanRun),
+                sources.Sources.All(source => source.CacheOnly),
+                sources.Sources.Any(HasMapSourceWarning),
+                string.Join("; ", sources.Sources.Select(source => $"{source.Region.Name}: {source.Detail}")));
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or IOException or InvalidOperationException)
         {
             Console.WriteLine($"Map source: FAILED ({ex.Message}).");
+            try { WriteMapCoverageFailureDiagnostics(route, mapper, selectedTiles); }
+            catch (Exception diagnosticError) { Console.WriteLine($"Coverage diagnostics unavailable: {diagnosticError.Message}"); }
             return new MapSourceAvailability(false, false, true, ex.Message);
         }
     }
@@ -257,28 +250,26 @@ internal static partial class Program
         using HttpClient client = CreateMapHttpClient(Timeout.InfiniteTimeSpan);
         IReadOnlyList<(double Lon, double Lat)> coveragePoints = GetMapAndRouteCoveragePoints(
             mapper, tiles, route.WorldTiles);
-        GeofabrikResolution resolution = await ResolveGeofabrikRegionAsync(
+        GeofabrikSourceSet sourceSet = await ResolveGeofabrikSourceSetAsync(
             client, route.RouteDir, mapper, coveragePoints, cacheOnly, cancellationToken);
-        if (!resolution.CanRun)
+        LogGeofabrikSourcePlan(sourceSet);
+        if (sourceSet.Sources.Count == 0 || sourceSet.Sources.Any(source => !source.CanRun))
+            throw new InvalidOperationException("The regional OSM source set is incomplete; see source plan. No extracts downloaded.");
+        List<GeofabrikExtract> extracts = [];
+        foreach (GeofabrikResolution source in sourceSet.Sources)
         {
-            throw new InvalidOperationException(
-                $"Geofabrik map source is unavailable and no usable cached extract exists: {resolution.Detail}");
+            cancellationToken.ThrowIfCancellationRequested();
+            extracts.Add(await EnsureGeofabrikExtractAsync(client, route.RouteDir, source.Region,
+                source.CachedExtractPath, cacheOnly || source.CacheOnly, cancellationToken));
         }
-        GeofabrikRegion region = resolution.Region;
-        GeofabrikExtract extract = await EnsureGeofabrikExtractAsync(
-            client,
-            route.RouteDir,
-            region,
-            resolution.CachedExtractPath,
-            cacheOnly || resolution.CacheOnly,
-            cancellationToken);
-        string pbfPath = extract.Path;
-        SetDiagnosticContext("OSM source path", pbfPath);
+        string[] sourcePaths = extracts.Select(extract => extract.Path).ToArray();
+        string pbfPath = sourcePaths[0];
+        SetDiagnosticContext("OSM source paths", string.Join("; ", sourcePaths));
         string terrainMapsDir = Path.Combine(route.RouteDir, "terrain_maps");
         Directory.CreateDirectory(terrainMapsDir);
 
-        Console.WriteLine($"\nCreating {tiles.Count:N0} TSRE terrain map tile(s) from {region.Name}...");
-        Console.WriteLine($"PBF cache: {pbfPath}");
+        Console.WriteLine($"\nCreating {tiles.Count:N0} TSRE terrain map tile(s) from {string.Join(" + ", sourceSet.Sources.Select(source => source.Region.Name))}...");
+        foreach (string sourcePath in sourcePaths) Console.WriteLine($"PBF cache: {sourcePath}");
         Console.WriteLine("STATUS: OSM - PROCESSING");
         WriteOsmLogSection("OSM / POLYVEG PROCESSING");
         WriteOsmLogBullet("This is a time-intensive operation.");
@@ -287,7 +278,8 @@ internal static partial class Program
         ConfigureOsmRuntime();
         int completed = 0;
         int started = 0;
-        string? routeWorkingCache = FindCurrentRouteOsmWorkingCache(route, pbfPath);
+        System.Collections.Concurrent.ConcurrentBag<string> mapTileFailures = [];
+        string? routeWorkingCache = FindCurrentRouteOsmWorkingCacheSet(route, sourcePaths);
         if (routeWorkingCache is null)
         {
             WriteOsmLogSubsection("ROUTE OSM EXTRACTION");
@@ -295,7 +287,7 @@ internal static partial class Program
             routeWorkingCache = BuildRouteOsmWorkingCacheFromSources(
                 route,
                 mapper,
-                [pbfPath],
+                sourcePaths,
                 cancellationToken);
         }
         else
@@ -309,7 +301,7 @@ internal static partial class Program
             null, null, null)
             ?? throw new InvalidOperationException("GDAL could not open the compact route OSM cache"))
         {
-            LoadOsmGeometry(dataSource, route, mapper, tiles, pbfPath, extract.Downloaded,
+            LoadOsmGeometry(dataSource, route, mapper, tiles, routeWorkingCache, extracts.Any(extract => extract.Downloaded),
                 cancellationToken, buildDerivative: true, collectMapGeometry: false);
         }
         WriteOsmLogEntry("Map geometry will be loaded and released per tile (at most two tiles in memory).");
@@ -356,6 +348,12 @@ internal static partial class Program
                 File.Move(pngTemp, pngPath, overwrite: true);
                 Interlocked.Increment(ref completed);
             }
+            catch (Exception ex) when (ex is InvalidDataException or ArgumentException or FormatException)
+            {
+                RecordTileException();
+                mapTileFailures.Add($"{baseName}: {ex.GetType().Name}: {ex.Message}");
+                WriteFailureDiagnostics($"Map tile exception - skipped: {baseName}; output={pngPath}", ex);
+            }
             catch (Exception ex)
             {
                 // Preserve the exact worker's paths, rather than relying only on
@@ -369,12 +367,22 @@ internal static partial class Program
             }
             finally
             {
-                if (File.Exists(pngTemp)) File.Delete(pngTemp);
+                try { if (File.Exists(pngTemp)) File.Delete(pngTemp); }
+                catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException)
+                {
+                    WriteOsmLogEntry($"WARNING: Could not remove temporary map file {pngTemp}: {cleanupError.Message}");
+                }
             }
             return ValueTask.CompletedTask;
         });
 
         WriteOsmLogSection("OSM / MAP RESULTS");
+        if (!mapTileFailures.IsEmpty)
+        {
+            WriteOsmLogEntry($"Completed with {mapTileFailures.Count} map tile exception(s):");
+            foreach (string failure in mapTileFailures.Order()) WriteOsmLogEntry(failure);
+            Console.WriteLine("STATUS: FAILURE - OSM / MAPS");
+        }
         WriteOsmLogEntry($"Created {completed:N0} TSRE F3 PNG map files.");
         WriteOsmLogEntry("Existing matching PNG files replaced; terrain files unchanged.");
         Console.WriteLine("STATUS: OSM / MAPS - COMPLETE");
@@ -392,7 +400,7 @@ internal static partial class Program
     private static HttpClient CreateMapHttpClient(TimeSpan timeout)
     {
         HttpClient client = new() { Timeout = timeout };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.500 (Open Rails terrain builder)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.501 (Open Rails terrain builder)");
         return client;
     }
 
@@ -415,188 +423,6 @@ internal static partial class Program
         Gdal.SetConfigOption("OGR_INTERLEAVED_READING", "YES");
     }
 
-    private static async Task<GeofabrikResolution> ResolveGeofabrikRegionAsync(
-        HttpClient client,
-        string routeDir,
-        GeoTileMapper mapper,
-        IReadOnlyList<(double Lon, double Lat)>? coveragePoints,
-        bool cacheOnly,
-        CancellationToken cancellationToken)
-    {
-        string cacheDir = GetMapCacheDirectory();
-        Directory.CreateDirectory(cacheDir);
-        string indexCachePath = Path.Combine(cacheDir, "geofabrik-index-v1.json");
-        string? indexJson = null;
-        bool remoteIndexAvailable = false;
-        string detail = "Geofabrik index unavailable";
-
-        if (!cacheOnly)
-        {
-            try
-            {
-                using HttpResponseMessage response = await client.GetAsync(GeofabrikIndexUrl, cancellationToken);
-                response.EnsureSuccessStatusCode();
-                indexJson = await response.Content.ReadAsStringAsync(cancellationToken);
-                File.WriteAllText(indexCachePath, indexJson, new UTF8Encoding(false));
-                remoteIndexAvailable = true;
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
-            {
-                detail = $"Geofabrik index request failed: {ex.Message}";
-            }
-        }
-
-        if (indexJson is null && File.Exists(indexCachePath))
-        {
-            indexJson = File.ReadAllText(indexCachePath);
-            detail += "; cached regional index used";
-        }
-
-        coveragePoints ??=
-        [
-            (mapper.MinLon, mapper.MinLat),
-            (mapper.MinLon, mapper.MaxLat),
-            (mapper.MaxLon, mapper.MinLat),
-            (mapper.MaxLon, mapper.MaxLat),
-            ((mapper.MinLon + mapper.MaxLon) / 2.0, (mapper.MinLat + mapper.MaxLat) / 2.0)
-        ];
-
-        if (indexJson is null)
-        {
-            ReusableOsmCache? reusable = FindReusableRouteOsmCache(
-                routeDir,
-                manifest => coveragePoints.All(point =>
-                    point.Lon >= manifest.MinLongitude && point.Lon <= manifest.MaxLongitude &&
-                    point.Lat >= manifest.MinLatitude && point.Lat <= manifest.MaxLatitude));
-            if (reusable is not null)
-            {
-                OsmCacheManifest manifest = reusable.Manifest;
-                GeofabrikRegion cachedRegion = new(
-                    manifest.RegionId,
-                    manifest.RegionName,
-                    manifest.DownloadUrl,
-                    manifest.SizeBytes,
-                    manifest.SourceModifiedUtc,
-                    manifest.MinLongitude,
-                    manifest.MinLatitude,
-                    manifest.MaxLongitude,
-                    manifest.MaxLatitude);
-                RegisterRouteOsmCache(reusable.RoutePath, manifest);
-                return new GeofabrikResolution(
-                    cachedRegion,
-                    false,
-                    false,
-                    true,
-                    reusable.PbfPath,
-                    string.Equals(reusable.RoutePath, Path.GetFullPath(routeDir), StringComparison.OrdinalIgnoreCase)
-                        ? "Geofabrik is unavailable; validated current-route manifest and PBF used"
-                        : $"Geofabrik is unavailable; validated route cache used from {reusable.RoutePath}");
-            }
-
-            throw new InvalidOperationException(detail + "; no cached regional index or covering route cache exists");
-        }
-
-        using JsonDocument document = JsonDocument.Parse(indexJson);
-        List<(GeofabrikRegion Region, double Area)> candidates = [];
-
-        foreach (JsonElement feature in document.RootElement.GetProperty("features").EnumerateArray())
-        {
-            if (!feature.TryGetProperty("properties", out JsonElement properties) ||
-                !properties.TryGetProperty("urls", out JsonElement urls) ||
-                !urls.TryGetProperty("pbf", out JsonElement pbfElement))
-            {
-                continue;
-            }
-
-            (double minLon, double minLat, double maxLon, double maxLat) = GetJsonGeometryEnvelope(feature.GetProperty("geometry"));
-            JsonElement geometry = feature.GetProperty("geometry");
-            bool coversSelection = coveragePoints.All(point =>
-                point.Lon >= minLon && point.Lon <= maxLon &&
-                point.Lat >= minLat && point.Lat <= maxLat &&
-                JsonGeometryContains(geometry, point.Lon, point.Lat));
-            if (!coversSelection)
-            {
-                continue;
-            }
-
-            string id = properties.GetProperty("id").GetString() ?? "unknown";
-            string name = properties.TryGetProperty("name", out JsonElement nameElement) ? nameElement.GetString() ?? id : id;
-            candidates.Add((
-                new GeofabrikRegion(id, name, pbfElement.GetString()!, 0, null, minLon, minLat, maxLon, maxLat),
-                (maxLon - minLon) * (maxLat - minLat)));
-        }
-
-        GeofabrikRegion chosen = candidates.OrderBy(c => c.Area).Select(c => c.Region).FirstOrDefault()
-            ?? throw new InvalidOperationException("no single Geofabrik regional extract covers every selected terrain tile");
-
-        HashSet<string> coveringRegionIds = candidates
-            .Select(candidate => candidate.Region.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        ReusableOsmCache? cached = FindReusableRouteOsmCache(
-            routeDir,
-            manifest => coveringRegionIds.Contains(manifest.RegionId));
-        if (cached is not null)
-        {
-            GeofabrikRegion indexedRegion = candidates
-                .Where(candidate => string.Equals(candidate.Region.Id, cached.Manifest.RegionId, StringComparison.OrdinalIgnoreCase))
-                .Select(candidate => candidate.Region)
-                .First();
-            GeofabrikRegion cachedRegion = indexedRegion with
-            {
-                Name = cached.Manifest.RegionName,
-                PbfUrl = cached.Manifest.DownloadUrl,
-                SizeBytes = cached.Manifest.SizeBytes,
-                Modified = cached.Manifest.SourceModifiedUtc
-            };
-            RegisterRouteOsmCache(cached.RoutePath, cached.Manifest);
-            return new GeofabrikResolution(
-                cachedRegion,
-                remoteIndexAvailable,
-                false,
-                true,
-                cached.PbfPath,
-                string.Equals(cached.RoutePath, Path.GetFullPath(routeDir), StringComparison.OrdinalIgnoreCase)
-                    ? "using current-route OSM cache; remote PBF not polled"
-                    : $"using covering OSM cache from {cached.RoutePath}; remote PBF not polled");
-        }
-
-        if (cacheOnly)
-        {
-            return new GeofabrikResolution(chosen, remoteIndexAvailable, false, false, null, detail);
-        }
-
-        try
-        {
-            using HttpRequestMessage head = new(HttpMethod.Head, chosen.PbfUrl);
-            using HttpResponseMessage headResponse = await client.SendAsync(head, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            headResponse.EnsureSuccessStatusCode();
-            GeofabrikRegion availableRegion = chosen with
-            {
-                SizeBytes = headResponse.Content.Headers.ContentLength ?? 0,
-                Modified = headResponse.Content.Headers.LastModified
-            };
-            return new GeofabrikResolution(
-                availableRegion,
-                remoteIndexAvailable,
-                true,
-                false,
-                null,
-                remoteIndexAvailable
-                    ? "remote Geofabrik index and PBF are available"
-                    : "cached Geofabrik index used; remote PBF is available");
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException)
-        {
-            return new GeofabrikResolution(
-                chosen,
-                remoteIndexAvailable,
-                false,
-                false,
-                null,
-                $"Geofabrik PBF request failed: {ex.Message}");
-        }
-    }
-
     private static async Task<GeofabrikSourceSet> ResolveGeofabrikSourceSetAsync(
         HttpClient client,
         string routeDir,
@@ -605,14 +431,91 @@ internal static partial class Program
         bool cacheOnly,
         CancellationToken cancellationToken)
     {
-        GeofabrikResolution fallback = await ResolveGeofabrikRegionAsync(
-            client, routeDir, mapper, coveragePoints, cacheOnly, cancellationToken);
         string indexPath = Path.Combine(GetMapCacheDirectory(), "geofabrik-index-v1.json");
-        if (!File.Exists(indexPath)) return new GeofabrikSourceSet([fallback]);
+        Directory.CreateDirectory(Path.GetDirectoryName(indexPath)!);
+        bool remoteIndexAvailable = false;
+        string? indexJson = null;
+        if (!cacheOnly)
+        {
+            try
+            {
+                indexJson = await client.GetStringAsync(GeofabrikIndexUrl, cancellationToken);
+                using JsonDocument validation = JsonDocument.Parse(indexJson);
+                validation.RootElement.GetProperty("features");
+                File.WriteAllText(indexPath, indexJson, new UTF8Encoding(false));
+                remoteIndexAvailable = true;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or JsonException)
+            {
+                Console.WriteLine($"Geofabrik index refresh unavailable: {ex.Message}; checking cached index.");
+                indexJson = null;
+            }
+        }
+        indexJson ??= File.Exists(indexPath) ? File.ReadAllText(indexPath) :
+            throw new InvalidOperationException("No regional index available; cannot safely select OSM sources.");
+        using JsonDocument document = JsonDocument.Parse(indexJson);
+        IReadOnlyList<GeofabrikRegion> selectedExtracts = SelectGeofabrikRegions(document.RootElement, coveragePoints);
+        List<GeofabrikResolution> resolutions = [];
+        foreach (GeofabrikRegion indexedRegion in selectedExtracts.OrderBy(extract => extract.Id, StringComparer.Ordinal))
+        {
+            ReusableOsmCache? reusable = FindReusableRouteOsmCache(routeDir,
+                manifest => string.Equals(manifest.RegionId, indexedRegion.Id, StringComparison.OrdinalIgnoreCase));
+            string routePath = reusable?.PbfPath ?? GetRouteGeofabrikExtractPath(routeDir, indexedRegion.Id);
+            if (IsUsableCacheFile(routePath))
+            {
+                FileInfo cached = new(routePath);
+                resolutions.Add(new GeofabrikResolution(
+                    indexedRegion with { SizeBytes = cached.Length, Modified = cached.LastWriteTimeUtc },
+                    remoteIndexAvailable, false, true, routePath,
+                    "using current-route regional extract"));
+                continue;
+            }
+            if (cacheOnly)
+            {
+                resolutions.Add(new GeofabrikResolution(
+                    indexedRegion, remoteIndexAvailable, false, false, null,
+                    "regional extract is not cached"));
+                continue;
+            }
+            try
+            {
+                using HttpRequestMessage head = new(HttpMethod.Head, indexedRegion.PbfUrl);
+                using HttpResponseMessage response = await client.SendAsync(
+                    head, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                resolutions.Add(new GeofabrikResolution(
+                    indexedRegion with
+                    {
+                        SizeBytes = response.Content.Headers.ContentLength ?? 0,
+                        Modified = response.Content.Headers.LastModified,
+                    },
+                    remoteIndexAvailable, true, false, null,
+                    "remote regional extract is available"));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                resolutions.Add(new GeofabrikResolution(
+                    indexedRegion, remoteIndexAvailable, false, false, null,
+                    $"regional extract request failed: {ex.Message}"));
+            }
+        }
+        Console.WriteLine(
+            "Geofabrik source selection: regional coverage set is " +
+            string.Join(" + ", selectedExtracts.Select(extract => extract.Name)) + ".");
+        return new GeofabrikSourceSet(resolutions);
+    }
 
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(indexPath));
+    private static IReadOnlyList<GeofabrikRegion> SelectGeofabrikRegions(
+        JsonElement regionalIndex, IReadOnlyList<(double Lon, double Lat)> coveragePoints)
+    {
+        if (coveragePoints.Count == 0) throw new InvalidOperationException("No map coverage points selected.");
+        coveragePoints = coveragePoints.Distinct().ToArray();
+        double routeArea = (coveragePoints.Max(p => p.Lon) - coveragePoints.Min(p => p.Lon)) *
+            (coveragePoints.Max(p => p.Lat) - coveragePoints.Min(p => p.Lat));
         List<(GeofabrikRegion Region, JsonElement Geometry)> relevantExtracts = [];
-        foreach (JsonElement feature in document.RootElement.GetProperty("features").EnumerateArray())
+        foreach (JsonElement feature in regionalIndex.GetProperty("features").EnumerateArray())
         {
             JsonElement properties = feature.GetProperty("properties");
             string id = properties.GetProperty("id").GetString() ?? "";
@@ -623,6 +526,8 @@ internal static partial class Program
             }
             (double minLon, double minLat, double maxLon, double maxLat) =
                 GetJsonGeometryEnvelope(feature.GetProperty("geometry"));
+            // Continental inputs can create enormous OSM node indexes for a local route.
+            if (routeArea < 100 && (maxLon - minLon) * (maxLat - minLat) > 1000) continue;
             JsonElement geometry = feature.GetProperty("geometry").Clone();
             if (coveragePoints.Any(point =>
                     point.Lon >= minLon && point.Lon <= maxLon &&
@@ -640,7 +545,7 @@ internal static partial class Program
         }
         if (relevantExtracts.Count == 0)
         {
-            return new GeofabrikSourceSet([fallback]);
+            throw new InvalidOperationException("No suitably sized regional extract set covers all selected terrain/world points; continental fallback refused.");
         }
 
         var coverageCandidates = relevantExtracts
@@ -685,7 +590,7 @@ internal static partial class Program
                     bestNewCoverage = newlyCovered;
                 }
             }
-            if (bestIndex < 0) return new GeofabrikSourceSet([fallback]);
+            if (bestIndex < 0) throw new InvalidOperationException("No suitably sized regional extract set covers all selected terrain/world points; continental fallback refused.");
             selectedIndexes.Add(bestIndex);
             for (int point = 0; point < uncovered.Length; point++)
             {
@@ -706,52 +611,26 @@ internal static partial class Program
             .Select(index => coverageCandidates[index].Extract)
             .ToList();
 
-        List<GeofabrikResolution> resolutions = [];
-        foreach ((GeofabrikRegion indexedRegion, _) in selectedExtracts.OrderBy(extract => extract.Region.Id, StringComparer.Ordinal))
-        {
-            string routePath = GetRouteGeofabrikExtractPath(routeDir, indexedRegion.Id);
-            if (IsUsableCacheFile(routePath))
-            {
-                FileInfo cached = new(routePath);
-                resolutions.Add(new GeofabrikResolution(
-                    indexedRegion with { SizeBytes = cached.Length, Modified = cached.LastWriteTimeUtc },
-                    fallback.RemoteIndexAvailable, false, true, routePath,
-                    "using current-route regional extract"));
-                continue;
-            }
-            if (cacheOnly)
-            {
-                resolutions.Add(new GeofabrikResolution(
-                    indexedRegion, fallback.RemoteIndexAvailable, false, false, null,
-                    "regional extract is not cached"));
-                continue;
-            }
-            try
-            {
-                using HttpRequestMessage head = new(HttpMethod.Head, indexedRegion.PbfUrl);
-                using HttpResponseMessage response = await client.SendAsync(
-                    head, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                response.EnsureSuccessStatusCode();
-                resolutions.Add(new GeofabrikResolution(
-                    indexedRegion with
-                    {
-                        SizeBytes = response.Content.Headers.ContentLength ?? 0,
-                        Modified = response.Content.Headers.LastModified,
-                    },
-                    fallback.RemoteIndexAvailable, true, false, null,
-                    "remote regional extract is available"));
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-            {
-                resolutions.Add(new GeofabrikResolution(
-                    indexedRegion, fallback.RemoteIndexAvailable, false, false, null,
-                    $"regional extract request failed: {ex.Message}"));
-            }
-        }
-        Console.WriteLine(
-            "Geofabrik source selection: smallest covering global extract set is " +
-            string.Join(" + ", selectedExtracts.Select(extract => extract.Region.Name)) + ".");
-        return new GeofabrikSourceSet(resolutions);
+        return selectedExtracts.Select(extract => extract.Region).ToArray();
+    }
+
+    private static void LogGeofabrikSourcePlan(GeofabrikSourceSet sources)
+    {
+        Console.WriteLine($"OSM source plan: {sources.Sources.Count} regional extract(s).");
+        foreach (GeofabrikResolution source in sources.Sources)
+            Console.WriteLine($"  {source.Region.Name} ({source.Region.Id}): {source.Region.SizeBytes:N0} bytes; {source.Detail}");
+        Console.WriteLine($"OSM planned download: {sources.Sources.Where(source => !source.CachedExtractAvailable).Sum(source => source.Region.SizeBytes):N0} bytes (unknown sizes reported as zero).");
+    }
+
+    private static string? FindCurrentRouteOsmWorkingCacheSet(RouteLayout route, IReadOnlyList<string> paths)
+    {
+        string? cache = FindUsableRouteOsmWorkingCache(route);
+        if (cache is null || RouteOsmWorkingSourceNeedsRefresh(route)) return null;
+        RouteOsmWorkingManifest? manifest = JsonSerializer.Deserialize<RouteOsmWorkingManifest>(
+            File.ReadAllText(Path.Combine(GetRouteOsmDirectory(route.RouteDir), RouteOsmWorkingManifestFileName)));
+        IEnumerable<string> previous = manifest?.Sources?.Select(source => source.Path) ?? [manifest?.SourcePath ?? ""];
+        return previous.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            .SetEquals(paths.Select(Path.GetFullPath)) ? cache : null;
     }
 
     private static IReadOnlyList<(double Lon, double Lat)> GetMapCoveragePoints(

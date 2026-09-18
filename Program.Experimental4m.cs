@@ -108,8 +108,9 @@ internal static partial class Program
                     $"{GlobalDemLabel}={result.GlobalSamplesUsed:N0}, " +
                     $"neighbor-fill={result.NeighborFilledSamples:N0}");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsOperationWideFailure(ex))
             {
+                RecordTileException();
                 WriteFailureDiagnostics("HD terrain failure", ex);
                 failed++;
                 retryableFailedTileNames.Add(GetTerrainTileBaseName(tile));
@@ -137,7 +138,8 @@ internal static partial class Program
             $"\n  HD TERRAIN DONE. Generated={generatedCount:N0}, skipped={skipped:N0}, " +
             $"failed={failed:N0}, total={tiles.Count:N0}.");
         PrintFailedTileTextFileBlock(retryableFailedTileNames);
-        return !aborted && failed == 0;
+        if (failed > 0) Console.WriteLine("STATUS: FAILURE - TILES");
+        return !aborted;
     }
 
     private static void WriteExperimental4mTile(

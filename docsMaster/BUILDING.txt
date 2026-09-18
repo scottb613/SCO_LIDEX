@@ -46,7 +46,7 @@ must be copied into every packaged distribution. Copy its text documents into
 the package root as well, verifying matching contents. README.md remains at the
 repository/package root. Internal rules and notes in docsInternal are not shipped.
 
-The release archive is dist\SCOLIDEX-v1.500-win-x64.zip, containing exactly one
+The release archive is dist\SCOLIDEX-v1.501-win-x64.zip, containing exactly one
 top-level SCOLIDEX folder. Verify the executable version, complete runtime/GDAL
 files, supplied WAV assets, terrain templates, documentation, ZIP size, and
 SHA-256 before publishing.
@@ -76,3 +76,9 @@ Failure diagnostics regression (no network or real route writes):
   dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --failure-diagnostics-probe
 Checks nested exceptions, stack traces, feature context, cancellation reports,
 context reset, and read-only file probes including a missing file.
+
+Regional OSM selection regression (no network):
+  dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --geofabrik-selection-probe
+Optional --index-file <geofabrik-index-v1.json> also checks an envelope grid
+from the MEC Mountain Division log against a real regional index. The route
+OSM lifecycle probe covers overlapping sources and secondary-source changes.

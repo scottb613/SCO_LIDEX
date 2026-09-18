@@ -44,6 +44,9 @@ internal static partial class Program
             TerrainTiles = terrainTiles;
         }
 
+        public List<string> SkippedOriginFiles { get; } = [];
+        public List<string> SkippedInvalidFiles { get; } = [];
+
         public string RouteDir { get; }
 
         public TileCoordinate? StartTile { get; }
@@ -99,14 +102,16 @@ internal static partial class Program
             IReadOnlyList<RouteMarker> markers;
             IReadOnlyList<WorldTile> worldTiles;
             IReadOnlyList<TerrainTile> terrainTiles;
+            List<string> skippedOriginFiles = [];
+            List<string> skippedInvalidFiles = [];
             try
             {
                 string trkText = File.ReadAllText(trkPath);
                 startTile = ParseRouteStart(trkText);
                 tsreProjection = ParseTsreGeoProjection(trkText);
                 markers = ReadMarkers(routeDir, routeName);
-                worldTiles = ReadWorldTiles(worldDir);
-                terrainTiles = ReadTerrainTiles(tilesDir, worldTiles);
+                worldTiles = ReadWorldTiles(worldDir, skippedOriginFiles);
+                terrainTiles = ReadTerrainTiles(tilesDir, worldTiles, skippedOriginFiles, skippedInvalidFiles);
             }
             catch (Exception ex)
             {
@@ -122,11 +127,13 @@ internal static partial class Program
 
             if (worldTiles.Count == 0)
             {
-                error = $"Error: no world .w files found in {worldDir}";
+                error = $"Error: no usable world .w files found in {worldDir} (null/origin files at X=0, Z=0 are excluded)";
                 return false;
             }
 
             route = new RouteLayout(routeDir, startTile, tsreProjection, markers, worldTiles, terrainTiles);
+            route.SkippedOriginFiles.AddRange(skippedOriginFiles);
+            route.SkippedInvalidFiles.AddRange(skippedInvalidFiles);
             error = "";
             return true;
         }
@@ -185,7 +192,7 @@ internal static partial class Program
             return markers;
         }
 
-        private static IReadOnlyList<WorldTile> ReadWorldTiles(string worldDir)
+        private static IReadOnlyList<WorldTile> ReadWorldTiles(string worldDir, List<string> skippedOriginFiles)
         {
             List<WorldTile> tiles = [];
             foreach (FileInfo file in new DirectoryInfo(worldDir).EnumerateFiles("w*.w"))
@@ -196,21 +203,42 @@ internal static partial class Program
                     continue;
                 }
 
-                tiles.Add(new WorldTile(
-                    int.Parse(match.Groups["x"].Value, CultureInfo.InvariantCulture),
-                    int.Parse(match.Groups["z"].Value, CultureInfo.InvariantCulture),
-                    file));
+                int x = int.Parse(match.Groups["x"].Value, CultureInfo.InvariantCulture);
+                int z = int.Parse(match.Groups["z"].Value, CultureInfo.InvariantCulture);
+                if (x == 0 && z == 0)
+                {
+                    skippedOriginFiles.Add(file.FullName);
+                    continue;
+                }
+                tiles.Add(new WorldTile(x, z, file));
             }
 
             return tiles;
         }
 
-        private static IReadOnlyList<TerrainTile> ReadTerrainTiles(string tilesDir, IReadOnlyList<WorldTile> worldTiles)
+        private static IReadOnlyList<TerrainTile> ReadTerrainTiles(string tilesDir, IReadOnlyList<WorldTile> worldTiles, List<string> skippedOriginFiles, List<string> skippedInvalidFiles)
         {
             List<TerrainTile> tiles = [];
             foreach (FileInfo tileFile in new DirectoryInfo(tilesDir).EnumerateFiles("*.t"))
             {
-                tiles.Add(new TerrainTile(tileFile, FindRawHeightPath(tileFile), FindMatchingWorldTile(tileFile, worldTiles)));
+                if (TryDecodeTileName(tileFile.Name, out TileCoordinate coordinate) && coordinate.X == 0 && coordinate.Z == 0)
+                {
+                    skippedOriginFiles.Add(tileFile.FullName);
+                    continue;
+                }
+                if (!TryDecodeTileName(tileFile.Name, out _) || tileFile.Name.StartsWith('_'))
+                {
+                    skippedInvalidFiles.Add($"{tileFile.FullName}: unsupported or undecodable terrain filename");
+                    continue;
+                }
+                try
+                {
+                    tiles.Add(new TerrainTile(tileFile, FindRawHeightPath(tileFile), FindMatchingWorldTile(tileFile, worldTiles)));
+                }
+                catch (Exception ex) when (ex is InvalidDataException or FormatException or FileNotFoundException)
+                {
+                    skippedInvalidFiles.Add($"{tileFile.FullName}: {ex.GetType().Name}: {ex.Message}");
+                }
             }
 
             return tiles.OrderBy(t => t.TileFile.Name, StringComparer.OrdinalIgnoreCase).ToArray();
