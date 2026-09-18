@@ -110,6 +110,7 @@ internal static partial class Program
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                WriteFailureDiagnostics("HD terrain failure", ex);
                 failed++;
                 retryableFailedTileNames.Add(GetTerrainTileBaseName(tile));
                 MarkTerrainTileForAppendRetry(tile, ExperimentalRawGridSize);
@@ -125,6 +126,7 @@ internal static partial class Program
         }
         catch (Exception ex)
         {
+            WriteFailureDiagnostics("HD terrain failure", ex);
             Console.WriteLine($"Error: failed while writing HD Test 4m terrain rows: {ex.Message}");
             return false;
         }

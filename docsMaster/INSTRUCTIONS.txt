@@ -149,6 +149,17 @@ Scan behavior:
   their own stable way sourceId. Normal developed-land, road, path, railway,
   water, building, and bare-ground exclusions still apply.
 
+  Large-route processing stages source geometry, exclusion masks, categorized
+  features, and section fragments in a temporary GeoPackage under osm_data.
+  Each terrain section loads its local sources and exclusions, processes them,
+  and releases them. Assembly, GeoJSON validation, and cache checks operate one
+  feature at a time. Map rendering loads geometry per tile for at most two
+  simultaneous tiles. Memory depends on local feature density and the largest
+  individual source feature; free disk space is needed for intermediate data.
+  Temporary staging is removed after completion, cancellation, or a handled
+  failure. A forcibly terminated process can leave polyveg-stage-*.gpkg files;
+  they are not final route output and are not reused as a completed cache.
+
   Visible-layer processing is partitioned into bounded terrain sections with
   a one-foot overlap halo. The halo preserves exclusions and drawing-order
   ownership across section edges; pieces are recombined under their original
@@ -215,8 +226,8 @@ Scan behavior:
   reload the route when testing replaced cache images.
 
   Map output uses compressed 2048x2048 PNG files by default or 4096x4096 PNGs
-  when Enable HD Map Tiles is selected. Processing loads selected-route geometry
-  once and retains it while two map bitmaps are rendered concurrently. Large
+  when Enable HD Map Tiles is selected. Processing loads geometry from the compact route cache
+  per tile while at most two map bitmaps are rendered concurrently. Large
   routes still require substantial
   time, memory, and disk space.
 
@@ -552,3 +563,39 @@ When reporting a problem, include:
 - The options selected.
 - SCOLIDEX.log.
 - A screenshot if the issue is visual.
+
+Multi-location Scan coverage checks (v1.500)
+------------------------------------------
+Scan checks up to five geographically spread-out locations for normal terrain
+and, separately, up to five for Distant Mountains. It starts in the largest
+tile group rather than relying on the first filename. A source is enabled when
+at least one sampled location has usable coverage. Mixed results produce
+warnings; the sampled coverage count is shown for each source. These are sample
+checks, not a guarantee of coverage for every selected tile. A stage remains
+disabled when none of its sampled locations has a usable source. DM-only checks
+contact Copernicus only.
+
+Scan also flags small terrain groups far from the main route inventory and
+prints filenames, tile coordinates, and approximate longitude/latitude. This is
+a conservative warning: legitimate disconnected terrain can also be remote.
+No files are moved or deleted, and selected outliers remain included in Run.
+Review suspected misplaced tiles in a test copy. Uncovered tiles may still fail
+during Run even when other parts of the route can be generated.
+
+Support diagnostics (v1.500)
+---------------------------
+Settings logs include CPU, available logical processors, and physical/available
+RAM. Run summaries show current working set, peak working set since application
+launch, and current private memory. Peak memory is not limited to the latest run.
+
+Failure and cancellation reports include the last observed stage and feature,
+source/output paths, and exception details where available. Concurrent workers
+may update the shared context; map-worker exception data records exact paths.
+Failures also attempt read-only file/storage checks for up to three seconds.
+Include the full SCOLIDEX.log when reporting a failure. Forced termination,
+power loss, or a native crash may prevent the final diagnostic report.
+
+PolyVeg export skips empty or negligible-area features after checking the exact
+exported coordinates. The log identifies each skipped source, category, and
+area, followed by a skipped-feature total. Other validation errors still stop
+promotion so the previous four-file handoff remains available.

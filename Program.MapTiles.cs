@@ -273,6 +273,7 @@ internal static partial class Program
             cacheOnly || resolution.CacheOnly,
             cancellationToken);
         string pbfPath = extract.Path;
+        SetDiagnosticContext("OSM source path", pbfPath);
         string terrainMapsDir = Path.Combine(route.RouteDir, "terrain_maps");
         Directory.CreateDirectory(terrainMapsDir);
 
@@ -281,7 +282,7 @@ internal static partial class Program
         Console.WriteLine("STATUS: OSM - PROCESSING");
         WriteOsmLogSection("OSM / POLYVEG PROCESSING");
         WriteOsmLogBullet("This is a time-intensive operation.");
-        WriteOsmLogBullet("Completed work is checkpointed; long operations report every five minutes.");
+        WriteOsmLogBullet("The route source cache is reusable; long operations report every five minutes.");
         WriteOsmLogSubsection("OSM SOURCE READING");
         ConfigureOsmRuntime();
         int completed = 0;
@@ -302,24 +303,16 @@ internal static partial class Program
             WriteOsmLogEntry($"Using current compact route OSM cache: {routeWorkingCache}");
         }
         WriteOsmLogSubsection("ROUTE FEATURE PROCESSING");
-        using GdalDataset dataSource = Gdal.OpenEx(
+        using (GdalDataset dataSource = Gdal.OpenEx(
             routeWorkingCache,
             (uint)(GdalConst.OF_VECTOR | GdalConst.OF_READONLY),
             null, null, null)
-            ?? throw new InvalidOperationException("GDAL could not open the compact route OSM cache");
-        List<OsmPrimitive> mapGeometry = LoadOsmGeometry(
-            dataSource,
-            route,
-            mapper,
-            tiles,
-            pbfPath,
-            extract.Downloaded,
-            cancellationToken);
-        long pointCount = mapGeometry.Sum(p =>
-            (long)p.Points.Length + p.InnerRings.Sum(ring => (long)ring.Length));
-        long estimatedBytes = (pointCount * 16L) + (mapGeometry.Count * 96L);
-        WriteOsmLogEntry(
-            $"Retained: {mapGeometry.Count:N0} geometry parts; {pointCount:N0} points; {FormatByteCount(estimatedBytes)} memory.");
+            ?? throw new InvalidOperationException("GDAL could not open the compact route OSM cache"))
+        {
+            LoadOsmGeometry(dataSource, route, mapper, tiles, pbfPath, extract.Downloaded,
+                cancellationToken, buildDerivative: true, collectMapGeometry: false);
+        }
+        WriteOsmLogEntry("Map geometry will be loaded and released per tile (at most two tiles in memory).");
         Console.WriteLine("STATUS: OSM - MAKING MAPS");
         WriteOsmLogSection("MAP TILE RENDERING");
         WriteOsmLogEntry($"Rendering {tiles.Count:N0} aligned TSRE map tiles.");
@@ -340,12 +333,20 @@ internal static partial class Program
             string pngName = GetTsreMapCacheFileName(worldTile);
             string pngPath = Path.Combine(terrainMapsDir, pngName);
             string pngTemp = pngPath + ".tmp";
+            SetDiagnosticContext("Map output path", pngPath);
+            SetDiagnosticContext("Map tile", baseName);
             int sequence = Interlocked.Increment(ref started);
 
             try
             {
                 WriteOsmLogEntry(
                     $"[{sequence.ToString().PadLeft(sequenceWidth)}/{tiles.Count}] {baseName} — rendering.");
+                // GDAL dataset/layer cursors must not be shared between workers.
+                using GdalDataset tileSource = Gdal.OpenEx(routeWorkingCache,
+                    (uint)(GdalConst.OF_VECTOR | GdalConst.OF_READONLY), null, null, null)
+                    ?? throw new IOException("Could not open map tile geometry cache");
+                List<OsmPrimitive> mapGeometry = LoadOsmGeometry(tileSource, route, mapper,
+                    [tile], pbfPath, false, tileCancellationToken, buildDerivative: false);
                 using Bitmap bitmap = RenderMapBitmap(mapGeometry, mapper, worldTile, tileCancellationToken, out int renderedParts);
                 WriteOsmLogEntry(renderedParts > 0
                     ? $"[{sequence.ToString().PadLeft(sequenceWidth)}/{tiles.Count}] {baseName} — {renderedParts:N0} geometry parts."
@@ -354,6 +355,17 @@ internal static partial class Program
 
                 File.Move(pngTemp, pngPath, overwrite: true);
                 Interlocked.Increment(ref completed);
+            }
+            catch (Exception ex)
+            {
+                // Preserve the exact worker's paths, rather than relying only on
+                // shared last-observed checkpoints from concurrent renderers.
+                ex.Data["Map tile"] = baseName;
+                ex.Data["World tile"] = $"X={worldTile.X}, Z={worldTile.Z}";
+                ex.Data["Map output path"] = pngPath;
+                ex.Data["Temporary output path"] = pngTemp;
+                ex.Data["Route geometry cache"] = routeWorkingCache;
+                throw;
             }
             finally
             {
@@ -380,7 +392,7 @@ internal static partial class Program
     private static HttpClient CreateMapHttpClient(TimeSpan timeout)
     {
         HttpClient client = new() { Timeout = timeout };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.400 (Open Rails terrain builder)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.500 (Open Rails terrain builder)");
         return client;
     }
 
@@ -1057,6 +1069,7 @@ internal static partial class Program
         internal ProcessingHeartbeat(string taskDescription)
         {
             task = taskDescription;
+            SetDiagnosticContext("OSM stage", taskDescription);
             WriteOsmLogEntry($"{task}...");
             timer = new System.Threading.Timer(
                 _ => WriteHeartbeat(), null, HeartbeatInterval, HeartbeatInterval);
@@ -1453,7 +1466,9 @@ internal static partial class Program
         IReadOnlyList<TerrainTile> tiles,
         string pbfPath,
         bool forceRouteDerivativeRefresh,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool buildDerivative = true,
+        bool collectMapGeometry = true)
     {
         double minLon = double.PositiveInfinity;
         double minLat = double.PositiveInfinity;
@@ -1467,12 +1482,13 @@ internal static partial class Program
             maxLon = Math.Max(maxLon, tileMaxLon);
             maxLat = Math.Max(maxLat, tileMaxLat);
         }
-        using RoutePolyVegGeodataBuilder? geodataBuilder = RoutePolyVegGeodataBuilder.TryCreate(
+        using RoutePolyVegGeodataBuilder? geodataBuilder = buildDerivative ? RoutePolyVegGeodataBuilder.TryCreate(
             route,
             mapper,
             pbfPath,
             forceRouteDerivativeRefresh,
-            cancellationToken);
+            cancellationToken) : null;
+        if (!collectMapGeometry && geodataBuilder is null) return [];
         if (geodataBuilder is not null)
         {
             minLon = Math.Min(minLon, geodataBuilder.MinLongitude);
@@ -1497,14 +1513,14 @@ internal static partial class Program
             }
             layer.SetSpatialFilterRect(minLon - padLon, minLat - padLat, maxLon + padLon, maxLat + padLat);
         }
-        WriteOsmLogEntry("Relation-safe read; completed geometry limited to route coverage.");
+        if (buildDerivative) WriteOsmLogEntry("Relation-safe read; geometry staged on disk for section processing.");
         dataSource.ResetReading();
         List<OsmPrimitive> primitives = [];
         double progress = 0;
         int featuresRead = 0;
         int nextReadPercent = 10;
         IntPtr layerHandle = IntPtr.Zero;
-        using (ProcessingHeartbeat stage = new("Reading and classifying OSM features"))
+        using (ProcessingHeartbeat? stage = buildDerivative ? new("Reading and classifying OSM features") : null)
         {
             while (true)
             {
@@ -1512,13 +1528,14 @@ internal static partial class Program
                 using Feature? feature = dataSource.GetNextFeature(ref layerHandle, ref progress, null!, "");
                 if (feature is null) break;
                 string layerName = feature.GetDefnRef().GetName();
+                SetDiagnosticContext("OSM feature", $"layer={layerName}; FID={feature.GetFID()}");
                 // The OSM driver must consume its node/point stream to assemble
                 // complete ways and relations, but LIDEX neither exports nor
                 // renders standalone points. Avoid geometry wrappers, topology
                 // checks, tag classification, and styling for millions of nodes.
                 if (string.Equals(layerName, "points", StringComparison.OrdinalIgnoreCase))
                 {
-                    ReportOsmReadProgress(progress, featuresRead, ref nextReadPercent);
+                    if (buildDerivative) ReportOsmReadProgress(progress, featuresRead, ref nextReadPercent);
                     continue;
                 }
                 using Geometry? geometry = feature.GetGeometryRef();
@@ -1526,20 +1543,20 @@ internal static partial class Program
                 featuresRead++;
                 geodataBuilder?.Collect(feature, geometry);
                 int sourcePartSequence = 0;
-                CollectOsmGeometry(
+                if (collectMapGeometry) CollectOsmGeometry(
                     geometry, GetOsmStyle(feature), StableOsmDrawSortKey(feature),
                     ref sourcePartSequence, primitives);
                 // GDAL can report 100% before its relation/feature stream is
                 // actually exhausted. Reserve the formal 100% checkpoint for EOF.
-                ReportOsmReadProgress(progress, featuresRead, ref nextReadPercent);
+                if (buildDerivative) ReportOsmReadProgress(progress, featuresRead, ref nextReadPercent);
             }
-            if (nextReadPercent <= 100)
+            if (buildDerivative && nextReadPercent <= 100)
             {
                 WriteOsmLogEntry(
                     $"OSM source read: 100% ({featuresRead:N0} route features classified).",
                     indent: 4);
             }
-            stage.Complete();
+            stage?.Complete();
         }
         geodataBuilder?.WriteAndPromote();
         primitives.Sort((left, right) =>

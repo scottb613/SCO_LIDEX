@@ -34,17 +34,45 @@ Distribution layout:
   AddShortcutDesktop.cmd
   README.md
   README.txt
+  LICENSE.txt and synchronized text documentation
   SCOLIDEX-win-x64\
   docsMaster\
 
 All WAV files under content\ are copied automatically to build and publish
 output. Keep every supplied sound there, including sounds reserved for later.
 
-The docsMaster folder is tracked in source and must be copied into every packaged
-distribution. Keep the root README files and docsMaster copies synchronized before
-publishing a release.
+The docsMaster folder is the tracked source for public text documentation and
+must be copied into every packaged distribution. Copy its text documents into
+the package root as well, verifying matching contents. README.md remains at the
+repository/package root. Internal rules and notes in docsInternal are not shipped.
+
+The release archive is dist\SCOLIDEX-v1.500-win-x64.zip, containing exactly one
+top-level SCOLIDEX folder. Verify the executable version, complete runtime/GDAL
+files, supplied WAV assets, terrain templates, documentation, ZIP size, and
+SHA-256 before publishing.
 
 License:
 SCO LIDEX source/application files are distributed under GNU GPL v3 or later.
 Third-party components remain under their own licenses. See LICENSE.txt and
 THIRD_PARTY_NOTICES.txt.
+
+OSM / PolyVeg regression probes (no network access):
+  dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --route-osm-lifecycle-probe
+  dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --osm-streaming-probe
+
+The lifecycle probe checks categories, colors, holes, section-boundary assembly,
+exclusions, per-tile map rendering, and preservation of prior outputs on failure
+or cancellation. The streaming probe reads 1,050,849 features, checks malformed
+JSON and cancellation, and exercises spatial/source indexes on 100,000 staged
+masks. Temporary fixtures are created under the OS temp folder and removed.
+
+Multi-location Scan regression (no network or route writes):
+  dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --scan-coverage-probe
+  Optional: append --tile-list <Tiles_Name.txt> to use the WuppExMod diagnostic
+  filename list. Covers remote-tile detection, deterministic selection, mixed
+  availability, all-uncovered/service-outage cases, DM-only, and cancellation.
+
+Failure diagnostics regression (no network or real route writes):
+  dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --failure-diagnostics-probe
+Checks nested exceptions, stack traces, feature context, cancellation reports,
+context reset, and read-only file probes including a missing file.

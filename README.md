@@ -4,9 +4,37 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 
 The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v2.txt](docsMaster/POLYVEG-GEODATA-CONTRACT-v2.txt).
 
-> **Current version:** v1.401 HOTFIX.
+> **Current version:** v1.500.
 
 ## Release Highlights
+
+### v1.500 - Bounded-memory OSM / PolyVeg processing
+
+- Scan checks up to five spread-out locations for normal terrain and separately
+  for Distant Mountains. Coverage at one location remains usable when another
+  sampled location is uncovered or unavailable. DM-only checks use Copernicus.
+- Scan warns about small, remote terrain groups with filenames and coordinates.
+  It does not remove tiles or guarantee coverage everywhere; Run continues to
+  report individual tile failures. Source checks honor cancellation.
+
+- Stages OSM source geometry, permanent exclusions, categorized features, and
+  section fragments in a temporary spatially indexed GeoPackage instead of
+  retaining the complete route in memory.
+- Builds exclusion unions and visible PolyVeg surfaces per terrain section,
+  preserving draw order, vegetation clearance, source identities, and holes.
+  Reassembles and writes one source feature at a time.
+- Streams GeoJSON validation and cache checks one feature at a time, fixing the
+  memory failure while validating large PolyVeg exclusion files.
+- Loads map geometry per tile with at most two concurrent renders.
+- Skips empty or negligible-area PolyVeg features after checking their exported
+  coordinates, logging source IDs, categories, areas, and a skipped-feature total.
+- Adds CPU and RAM details to settings logs and current/peak process memory to
+  run summaries. Failure and cancellation reports retain stage, source, output,
+  exception, and stack-trace details; failures include bounded read-only storage
+  checks to help diagnose route or disk problems.
+- Retains the four-file PolyVeg handoff and validates all outputs before
+  promotion. Temporary staging requires free disk space in route osm_data and
+  is removed on completion, cancellation, or a handled failure.
 
 ### v1.401 — HOTFIX
 
@@ -73,7 +101,7 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 - Renders one 4096×4096 map overlay per selected 2048-meter normal terrain tile and writes it directly to TSRE's F3 `terrain_maps/<X*10000+Y>.png` cache.
 - Overwrites a matching cached PNG without creating a map ACE or changing terrain materials, 16×16 patch UVs, TERRTEX files, or Distant Mountain tiles.
 - Projects every OSM vertex through the same corrected tile-local coordinate path used by terrain sampling; the Austria acceptance route reports zero pixel error at tile corners and center.
-- Loads compact selected-route geometry once, retains it for the complete run, and renders two 4096 bitmaps concurrently.
+- Loads map geometry per tile from the compact route cache and renders at most two map bitmaps concurrently.
 - Uses bundled GDAL and TSRE's F3 PNG naming/projection behavior; no API key, external map service, route-editor executable, or legacy MSTS runtime is required.
 - Ports TSRE's OSM drawing style: warm paper background, pale land-use fills, outlined buildings, feature ordering, railway treatment, and cased motorway/primary/secondary/tertiary road colors and widths.
 
@@ -139,7 +167,7 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 
 ## Installation
 
-1. Download `SCOLIDEX-v1.401-win-x64.zip` from the [v1.401 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.401).
+1. Download `SCOLIDEX-v1.500-win-x64.zip` from the [v1.500 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.500).
 2. Extract the complete archive to a writable folder.
 3. Run `SCOLIDEX-win-x64\SCOLIDEX.exe`.
 4. Optionally run `AddShortcutDesktop.cmd` from the extracted top-level folder.

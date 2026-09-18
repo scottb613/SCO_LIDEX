@@ -3,7 +3,7 @@ SCO LIDEX / TSRE GenX PolyVeg Geodata Contract v2
 
 Status
 ------
-Development contract for SCO LIDEX v1.401 and TSRE GenX v0.12.
+Development contract for SCO LIDEX v1.500 and TSRE GenX v0.12.
 PolyVeg is the only planting-geodata handoff. There is no legacy forest
 GeoJSON fallback.
 
@@ -31,7 +31,7 @@ Category     styleId                         RGB             drawOrder
 woodland     natural=wood                    141,196,108     20
 woodland     landuse=forest                  133,193,133     20
 woodland     landuse=wood                    133,193,133     20
-woodland     natural=tree_row                133,193,133     30
+woodland     natural=tree_row                141,196,108     30
 scrub        natural=scrub                   181,226,181     20
 heath        natural=heath                   213,216,159     20
 wetland      natural=wetland                  95,180,160     20
@@ -100,6 +100,15 @@ recombine pieces by sourceId before export. Exclusion and overlap topology may
 be validated within each bounded section; final validation still verifies the
 assembled feature schema, identity, CRS, polygonal geometry, and manifest
 counts before atomic promotion.
+
+LIDEX v1.500 stages intermediate geometry and section fragments on disk in a
+private temporary GeoPackage. These staging files are not TSRE handoff files.
+Exclusion unions use only each section's local masks. Final features are
+assembled per source; validation and cache checks stream individual features.
+The generator revision advances to 7; schemaVersion remains 2.
+Degenerate geographic exports are omitted before writing and counting features;
+the log identifies each skipped source and reports the total. Final validation
+remains strict for the retained features and the permanent exclusion output.
 
 Because this output controls terrain vegetation rather than surveyed parcel
 boundaries, LIDEX maintains a 0.3048 m (one-foot) non-plantable clearance at

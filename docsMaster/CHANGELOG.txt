@@ -1,6 +1,38 @@
 SCO LIDEX Changelog
 ===================
 
+v1.500
+------
+
+- Skips PolyVeg features whose exported geometry is empty or has negligible
+  area, logging each source ID, category, area, and a skipped-feature total.
+  Checks the exact exported coordinates before counting/writing the feature.
+- Adds failure/cancellation reports with stage and feature context, nested
+  exceptions, stack traces, and exact map-worker paths where available.
+  Failure reports use bounded read-only file/storage checks, and log text is
+  flushed before UI display. Forced termination may prevent a final report.
+- Logs CPU model, available logical processors, physical RAM, and available RAM
+  in settings; run totals include current and application-lifetime peak memory.
+
+- Scan checks up to five spread-out locations for normal terrain and separately
+  for Distant Mountains. Coverage at one location remains usable when another
+  sampled location is uncovered or unavailable. DM-only checks use Copernicus.
+- Scan warns about small, remote terrain groups with filenames and coordinates.
+  It does not remove tiles or guarantee coverage everywhere; Run continues to
+  report individual tile failures. Source checks honor cancellation.
+- Stages OSM source geometry, permanent exclusions, categorized features, and
+  section fragments in a temporary spatially indexed GeoPackage instead of
+  retaining the complete route in memory.
+- Builds exclusion unions and visible PolyVeg surfaces per terrain section,
+  preserving draw order, vegetation clearance, source identities, and holes.
+  Reassembles and writes one source feature at a time.
+- Streams GeoJSON validation and cache checks one feature at a time, fixing the
+  memory failure while validating large PolyVeg exclusion files.
+- Loads map geometry per tile with at most two concurrent renders.
+- Retains the four-file PolyVeg handoff and validates all outputs before
+  promotion. Temporary staging requires free disk space in route osm_data and
+  is removed on completion, cancellation, or a handled failure.
+
 v1.401 HOTFIX
 -------------
 - Preserved fractional-metre DEM elevations from source sampling through

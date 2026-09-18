@@ -188,6 +188,7 @@ internal static partial class Program
             }
             catch (Exception ex)
             {
+                WriteFailureDiagnostics("Distant Mountain failure", ex);
                 failed++;
                 MarkDistantMountainTileForAppendRetry(tilePath, heightPath);
                 WriteLogDetail("Distant Mountain generation failed", ex.Message);
@@ -200,6 +201,7 @@ internal static partial class Program
         }
         catch (Exception ex)
         {
+            WriteFailureDiagnostics("Distant Mountain failure", ex);
             Console.WriteLine($"Distant Mountain rolling write failed: {ex.Message}");
             failed++;
         }

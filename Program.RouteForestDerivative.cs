@@ -6,6 +6,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using OSGeo.OGR;
 using OSGeo.OSR;
 
@@ -42,7 +43,7 @@ internal static partial class Program
                 {
                     type = "FeatureCollection",
                     schemaVersion = 2,
-                    generatorRevision = 5,
+                    generatorRevision = 7,
                     source = new
                     {
                         pbfPath = pbf.FullName,
@@ -106,10 +107,10 @@ internal static partial class Program
         }
     }
 
-    private sealed class RoutePolyVegGeodataBuilder : IDisposable
+    private sealed partial class RoutePolyVegGeodataBuilder : IDisposable
     {
         private const int SchemaVersion = 2;
-        private const int GeneratorRevision = 5;
+        private const int GeneratorRevision = 7;
         private const double CoverageBufferMetres = 2048.0;
         private const double GeometryAreaToleranceSquareMetres = 0.01;
         private const double OverlayPrecisionMetres = 0.01;
@@ -137,17 +138,18 @@ internal static partial class Program
             int FillGreen,
             int FillBlue,
             Dictionary<string, string> Properties,
-            Geometry ProjectedGeometry);
+            [property: JsonIgnore] Geometry ProjectedGeometry,
+            double OriginalArea = 0);
 
         private sealed record RouteVectorFeature(
             string LayerName,
             Dictionary<string, string> Properties,
-            Geometry Geometry);
+            [property: JsonIgnore] Geometry Geometry);
 
         private sealed record PolyVegExclusion(
             string Id,
             string Kind,
-            Geometry ProjectedGeometry);
+            [property: JsonIgnore] Geometry ProjectedGeometry);
 
         private static readonly string[] RouteLayerNames =
         [
@@ -183,10 +185,7 @@ internal static partial class Program
         private readonly Geometry bufferedCoverageGeographic;
         private readonly CoordinateTransformation toProjected;
         private readonly CoordinateTransformation toGeographic;
-        private readonly Geometry exclusionPolygons = new(wkbGeometryType.wkbMultiPolygon);
-        private readonly List<PolyVegSource> polyVegSources = [];
-        private readonly List<RouteVectorFeature> routeVectorFeatures = [];
-        private readonly List<PolyVegExclusion> polyVegExclusions = [];
+        private readonly OsmGeometryStage stage;
         private readonly CancellationToken cancellationToken;
         private bool promoted;
         private int polyVegSourceCount;
@@ -205,6 +204,8 @@ internal static partial class Program
             this.mapper = mapper;
             pbfPath = Path.GetFullPath(sourcePbfPath);
             outputPath = Path.Combine(GetRouteOsmDirectory(route.RouteDir), "polyveg-polygons.geojson");
+            SetDiagnosticContext("PolyVeg output path", outputPath);
+            SetDiagnosticContext("OSM source path", pbfPath);
             coverageTiles = GetRouteCoverageTiles(route);
             coverageFingerprint = GetRouteCoverageFingerprint(route);
             cancellationToken = token;
@@ -230,6 +231,11 @@ internal static partial class Program
             MinLatitude = envelope.MinY;
             MaxLongitude = envelope.MaxX;
             MaxLatitude = envelope.MaxY;
+            string stageDirectory = GetRouteOsmDirectory(routeDirectory);
+            Directory.CreateDirectory(stageDirectory);
+            stage = new OsmGeometryStage(
+                Path.Combine(stageDirectory, "polyveg-stage-" + Guid.NewGuid().ToString("N") + ".gpkg"),
+                projected, geographic);
         }
 
         internal double MinLongitude { get; }
@@ -260,8 +266,8 @@ internal static partial class Program
             string manifestPath = Path.Combine(GetRouteOsmDirectory(route.RouteDir), "route-geodata.json");
             string fingerprint = GetRouteCoverageFingerprint(route);
             if (!forceRefresh &&
-                IsPolyVegDerivativeCurrent(outputPath, pbfPath, fingerprint) &&
-                IsPolyVegDerivativeCurrent(exclusionsPath, pbfPath, fingerprint) &&
+                IsPolyVegDerivativeCurrent(outputPath, pbfPath, fingerprint, cancellationToken) &&
+                IsPolyVegDerivativeCurrent(exclusionsPath, pbfPath, fingerprint, cancellationToken) &&
                 IsRouteGeodataManifestCurrent(manifestPath, geopackagePath, pbfPath, fingerprint))
             {
                 WriteOsmLogEntry("PolyVeg contract is current; rebuild not required.");
@@ -322,7 +328,7 @@ internal static partial class Program
                         Geometry? normalized = ExtractGeometryFamily(clipped, polygons: true);
                         if (normalized is not null && normalized.GetArea() > GeometryAreaToleranceSquareMetres)
                         {
-                            polyVegSources.Add(new PolyVegSource(
+                            StageSource(new PolyVegSource(
                                 StablePolygonSourceId(feature),
                                 category.Category,
                                 category.StyleId,
@@ -334,6 +340,7 @@ internal static partial class Program
                                 normalized));
                             polyVegSourceCount++;
                         }
+                        else normalized?.Dispose();
                     }
                 }
 
@@ -356,7 +363,7 @@ internal static partial class Program
                         Geometry? normalized = ExtractGeometryFamily(routeClipped, polygons: true);
                         if (normalized is not null)
                         {
-                            polyVegExclusions.Add(new PolyVegExclusion(
+                            StageExclusion(new PolyVegExclusion(
                                 ExclusionId(feature, exclusionKind!), exclusionKind!, normalized));
                         }
                     }
@@ -395,9 +402,10 @@ internal static partial class Program
                     string? kind = LineExclusionKind(feature);
                     if (normalized is not null && kind is not null)
                     {
-                        polyVegExclusions.Add(new PolyVegExclusion(
+                        StageExclusion(new PolyVegExclusion(
                             ExclusionId(feature, kind), kind, normalized));
                     }
+                    else normalized?.Dispose();
                 }
             }
         }
@@ -408,7 +416,8 @@ internal static partial class Program
             WriteOsmLogSubsection("PERMANENT EXCLUSIONS");
             WriteOsmLogEntry(
                 $"Sources: {polyVegSourceCount:N0} PolyVeg; {exclusionPolygonFeatureCount:N0} polygon masks; {exclusionLineFeatureCount:N0} line masks.");
-            using Geometry? exclusionMask = BuildPermanentExclusionUnionWithStatus();
+            stage.Flush();
+            WriteOsmLogEntry($"Staged on disk: {stage.Count("masks"):N0} exclusion parts; combining only within each terrain section.");
 
             string osmDirectory = GetRouteOsmDirectory(routeDirectory);
             Directory.CreateDirectory(osmDirectory);
@@ -431,7 +440,7 @@ internal static partial class Program
                 using (ProcessingHeartbeat stage = new("Building final PolyVeg surfaces"))
                 {
                     (writtenFeatures, writtenParts, writtenHoles) = WritePolyVegPolygons(
-                        temporaryPath, exclusionMask, categoryCounts);
+                        temporaryPath, categoryCounts);
                     stage.Complete();
                 }
                 WriteOsmLogSubsection("POLYVEG VALIDATION");
@@ -472,6 +481,7 @@ internal static partial class Program
                         temporaryManifestPath, layerCounts, categoryCounts, writtenFeatures, writtenExclusions);
                     ValidateRouteGeodataManifest(
                         temporaryManifestPath, layerCounts, categoryCounts, writtenFeatures, writtenExclusions);
+                    cancellationToken.ThrowIfCancellationRequested();
                     PromoteDerivativeSet(
                         (temporaryPath, outputPath),
                         (temporaryExclusionsPath, exclusionsPath),
@@ -506,48 +516,52 @@ internal static partial class Program
             WriteOsmLogEntry($"Manifest: {manifestPath}");
         }
 
-        private Geometry? BuildPermanentExclusionUnionWithStatus()
+        private void StageSource(PolyVegSource source)
         {
-            using ProcessingHeartbeat stage = new(
-                $"Combining {exclusionPolygons.GetGeometryCount():N0} permanent exclusion polygons");
-            Geometry? result = BuildPermanentExclusionUnion();
-            stage.Complete();
-            return result;
+            using Geometry original = source.ProjectedGeometry;
+            using Geometry? normalized = NormalizePolygonalOverlay(original, TerrainOverlayPrecisionMetres);
+            if (normalized is not null && !normalized.IsEmpty())
+                stage.Add("sources", normalized, JsonSerializer.Serialize(source with { OriginalArea = original.GetArea() }));
         }
 
-        private Geometry? BuildPermanentExclusionUnion()
+        private void StageExclusion(PolyVegExclusion exclusion)
         {
-            if (exclusionPolygons.GetGeometryCount() == 0) return null;
-            Geometry? union = null;
-            try
-            {
-                union = exclusionPolygons.UnionCascaded();
-            }
-            catch (Exception firstFailure)
-            {
-                WriteOsmLogEntry(
-                    "Normalizing permanent-exclusion topology: " + firstFailure.Message,
-                    indent: 4);
-                union = exclusionPolygons.Buffer(0.0, 8);
-                if (union is null || union.IsEmpty())
-                {
-                    union?.Dispose();
-                    throw new InvalidDataException(
-                        "permanent exclusion topology normalization produced no polygon geometry",
-                        firstFailure);
-                }
-            }
+            using Geometry geometry = exclusion.ProjectedGeometry;
+            stage.Add("exclusions", geometry, JsonSerializer.Serialize(exclusion));
+        }
 
+        private void StageVector(RouteVectorFeature feature)
+        {
+            using Geometry geometry = feature.Geometry;
+            stage.Add("vectors", geometry, JsonSerializer.Serialize(feature));
+        }
+
+        private Geometry? BuildLocalExclusionUnion(Geometry context)
+        {
+            using Geometry polygons = new(wkbGeometryType.wkbMultiPolygon);
+            foreach (var row in stage.Read("masks", context))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                using Geometry? clipped = row.Geometry.Intersection(context);
+                if (clipped is not null && !clipped.IsEmpty()) AddPolygonParts(clipped, polygons);
+            }
+            if (polygons.GetGeometryCount() == 0) return null;
+            Geometry? union;
+            try { union = polygons.UnionCascaded(); }
+            catch (Exception ex)
+            {
+                WriteOsmLogEntry("Normalizing local exclusion topology: " + ex.Message, indent: 4);
+                union = polygons.Buffer(0.0, 8);
+            }
             using (union)
             {
-                Geometry? normalized = NormalizePolygonalOverlay(
-                    union,
-                    TerrainOverlayPrecisionMetres);
+                if (union is null || union.IsEmpty())
+                    throw new InvalidDataException("Local exclusion union produced no geometry");
+                Geometry? normalized = NormalizePolygonalOverlay(union, TerrainOverlayPrecisionMetres);
                 if (normalized is null || normalized.IsEmpty())
                 {
                     normalized?.Dispose();
-                    throw new InvalidDataException(
-                        "permanent exclusion union produced no usable polygon geometry");
+                    throw new InvalidDataException("Local exclusion normalization produced no geometry");
                 }
                 return normalized;
             }
@@ -555,22 +569,7 @@ internal static partial class Program
 
         public void Dispose()
         {
-            foreach (PolyVegSource source in polyVegSources)
-            {
-                source.ProjectedGeometry.Dispose();
-            }
-
-            foreach (RouteVectorFeature feature in routeVectorFeatures)
-            {
-                feature.Geometry.Dispose();
-            }
-
-            foreach (PolyVegExclusion exclusion in polyVegExclusions)
-            {
-                exclusion.ProjectedGeometry.Dispose();
-            }
-
-            exclusionPolygons.Dispose();
+            stage.Dispose();
             exactCoverageGeographic.Dispose();
             exactCoverageProjected.Dispose();
             bufferedCoverageGeographic.Dispose();
@@ -625,204 +624,197 @@ internal static partial class Program
 
         private (int Features, int Parts, int Holes) WritePolyVegPolygons(
             string path,
-            Geometry? exclusionMask,
             IDictionary<string, int> categoryCounts)
         {
-            int written = 0;
-            int parts = 0;
-            int holes = 0;
-            PolyVegSource[] orderedSources = polyVegSources
-                .OrderByDescending(source => source.DrawOrder)
-                .ThenByDescending(source => source.SourceId, StringComparer.Ordinal)
-                .ThenByDescending(source => source.Category, StringComparer.Ordinal)
-                .ToArray();
-            Geometry?[] normalizedSources = new Geometry?[orderedSources.Length];
-            Envelope[] sourceEnvelopes = new Envelope[orderedSources.Length];
-            Geometry?[] visibleBySource = new Geometry?[orderedSources.Length];
-            try
+            int written = 0, parts = 0, holes = 0;
+            WriteOsmLogSubsection("TERRAIN-SECTION STACKING");
+            WriteOsmLogEntry($"Processing {coverageTiles.Count:N0} terrain sections; geometry and masks are loaded and released per section.", indent: 4);
+            ProcessingCheckpoints tileProgress = new(coverageTiles.Count);
+            for (int tileIndex = 0; tileIndex < coverageTiles.Count; tileIndex++)
             {
-                WriteOsmLogSubsection("SOURCE NORMALIZATION");
-                ProcessingCheckpoints normalizationProgress = new(orderedSources.Length);
-                for (int sourceIndex = 0; sourceIndex < orderedSources.Length; sourceIndex++)
+                cancellationToken.ThrowIfCancellationRequested();
+                SetDiagnosticContext("Terrain section", $"{tileIndex + 1}/{coverageTiles.Count}; X={coverageTiles[tileIndex].X}, Z={coverageTiles[tileIndex].Z}");
+                using Geometry core = BuildProjectedTileCoverage(coverageTiles[tileIndex]);
+                using Geometry context = core.Buffer(TerrainVegetationSeparationMetres * 2.0, 4)
+                    ?? throw new InvalidDataException("Could not create terrain-section overlap context");
+                List<(long Id, PolyVegSource Source)> localSources = [];
+                Geometry? separatedLocalExclusions = null;
+                Geometry? rawLocalExclusions = null;
+                Geometry? claimedLocal = null;
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    normalizedSources[sourceIndex] = NormalizePolygonalOverlay(
-                        orderedSources[sourceIndex].ProjectedGeometry,
-                        TerrainOverlayPrecisionMetres);
-                    sourceEnvelopes[sourceIndex] = new Envelope();
-                    normalizedSources[sourceIndex]?.GetEnvelope(sourceEnvelopes[sourceIndex]);
-                    normalizationProgress.Report(sourceIndex + 1, "PolyVeg sources normalized");
-                }
-
-                WriteOsmLogSubsection("TERRAIN-SECTION STACKING");
-                WriteOsmLogEntry(
-                    $"Processing {coverageTiles.Count:N0} terrain sections with a one-foot overlap halo.",
-                    indent: 4);
-                ProcessingCheckpoints tileProgress = new(coverageTiles.Count);
-                for (int tileIndex = 0; tileIndex < coverageTiles.Count; tileIndex++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    using Geometry core = BuildProjectedTileCoverage(coverageTiles[tileIndex]);
-                    using Geometry context = core.Buffer(TerrainVegetationSeparationMetres * 2.0, 4)
-                        ?? throw new InvalidDataException("could not create terrain-section overlap context");
-                    Envelope contextEnvelope = new();
-                    context.GetEnvelope(contextEnvelope);
-                    Geometry? separatedLocalExclusions = null;
-                    Geometry? rawLocalExclusions = null;
-                    Geometry? claimedLocal = null;
-                    try
+                    foreach (var row in stage.Read("sources", context))
                     {
-                        if (exclusionMask is not null)
+                        cancellationToken.ThrowIfCancellationRequested();
+                        PolyVegSource metadata = JsonSerializer.Deserialize<PolyVegSource>(row.Payload)!;
+                        SetDiagnosticContext("PolyVeg feature", $"{metadata.SourceId}; category={metadata.Category}");
+                        using Geometry? clipped = row.Geometry.Intersection(context);
+                        if (clipped is not null && !clipped.IsEmpty())
+                            localSources.Add((row.Id, metadata with { ProjectedGeometry = clipped.Clone() }));
+                    }
+                    var orderedSources = localSources.OrderByDescending(item => item.Source.DrawOrder)
+                        .ThenByDescending(item => item.Source.SourceId, StringComparer.Ordinal)
+                        .ThenByDescending(item => item.Source.Category, StringComparer.Ordinal)
+                        .ThenBy(item => item.Id).ToArray();
+                    // Sections without plantable sources do not need a mask union.
+                    if (orderedSources.Length > 0) rawLocalExclusions = BuildLocalExclusionUnion(context);
+                    if (rawLocalExclusions is not null && !rawLocalExclusions.IsEmpty())
+                    {
+                        using Geometry? expanded = rawLocalExclusions.Buffer(TerrainVegetationSeparationMetres, 4);
+                        if (expanded is not null && !expanded.IsEmpty())
+                            separatedLocalExclusions = NormalizePolygonalOverlay(expanded, TerrainOverlayPrecisionMetres);
+                    }
+                    for (int sourceIndex = 0; sourceIndex < orderedSources.Length; sourceIndex++)
+                    {
+                        Geometry? normalizedSource = orderedSources[sourceIndex].Source.ProjectedGeometry;
+                        if (normalizedSource is null || normalizedSource.IsEmpty())
                         {
-                            rawLocalExclusions = exclusionMask.Intersection(context);
-                            if (rawLocalExclusions is not null && !rawLocalExclusions.IsEmpty())
+                            continue;
+                        }
+
+                        using Geometry? localSource = normalizedSource.Intersection(context);
+                        if (localSource is null || localSource.IsEmpty()) continue;
+                        using Geometry? withoutExclusions = separatedLocalExclusions is null
+                            ? localSource.Clone()
+                            : DifferenceWithTopologyRetry(
+                                localSource,
+                                separatedLocalExclusions,
+                                $"local permanent exclusions for {orderedSources[sourceIndex].Source.SourceId}");
+                        if (withoutExclusions is null || withoutExclusions.IsEmpty()) continue;
+                        using Geometry? visible = claimedLocal is null || claimedLocal.IsEmpty()
+                            ? withoutExclusions.Clone()
+                            : DifferenceWithTopologyRetry(
+                                withoutExclusions,
+                                claimedLocal,
+                                $"local visible-layer stacking for {orderedSources[sourceIndex].Source.SourceId}");
+                        if (visible is null || visible.IsEmpty() ||
+                            visible.GetArea() <= GeometryAreaToleranceSquareMetres) continue;
+                        if (claimedLocal is not null)
+                        {
+                            using Geometry? overlapConflict = visible.Intersection(claimedLocal);
+                            if (overlapConflict is not null &&
+                                overlapConflict.GetArea() > GeometryAreaToleranceSquareMetres)
                             {
-                                using Geometry? expanded = rawLocalExclusions.Buffer(
-                                    TerrainVegetationSeparationMetres,
-                                    4);
-                                if (expanded is not null && !expanded.IsEmpty())
-                                {
-                                    separatedLocalExclusions = NormalizePolygonalOverlay(
-                                        expanded,
-                                        TerrainOverlayPrecisionMetres);
-                                }
+                                throw new InvalidDataException(
+                                    $"terrain section {coverageTiles[tileIndex].X},{coverageTiles[tileIndex].Z} " +
+                                    $"retained a visible-layer overlap for {orderedSources[sourceIndex].Source.SourceId}");
                             }
                         }
 
-                        for (int sourceIndex = 0; sourceIndex < orderedSources.Length; sourceIndex++)
+                        using Geometry? coreVisible = visible.Intersection(core);
+                        if (coreVisible is not null && !coreVisible.IsEmpty() &&
+                            coreVisible.GetArea() > GeometryAreaToleranceSquareMetres)
                         {
-                            Geometry? normalizedSource = normalizedSources[sourceIndex];
-                            if (normalizedSource is null || normalizedSource.IsEmpty() ||
-                                !EnvelopesIntersect(sourceEnvelopes[sourceIndex], contextEnvelope))
+                            if (rawLocalExclusions is not null)
                             {
-                                continue;
-                            }
-
-                            using Geometry? localSource = normalizedSource.Intersection(context);
-                            if (localSource is null || localSource.IsEmpty()) continue;
-                            using Geometry? withoutExclusions = separatedLocalExclusions is null
-                                ? localSource.Clone()
-                                : DifferenceWithTopologyRetry(
-                                    localSource,
-                                    separatedLocalExclusions,
-                                    $"local permanent exclusions for {orderedSources[sourceIndex].SourceId}");
-                            if (withoutExclusions is null || withoutExclusions.IsEmpty()) continue;
-                            using Geometry? visible = claimedLocal is null || claimedLocal.IsEmpty()
-                                ? withoutExclusions.Clone()
-                                : DifferenceWithTopologyRetry(
-                                    withoutExclusions,
-                                    claimedLocal,
-                                    $"local visible-layer stacking for {orderedSources[sourceIndex].SourceId}");
-                            if (visible is null || visible.IsEmpty() ||
-                                visible.GetArea() <= GeometryAreaToleranceSquareMetres) continue;
-                            if (claimedLocal is not null)
-                            {
-                                using Geometry? overlapConflict = visible.Intersection(claimedLocal);
-                                if (overlapConflict is not null &&
-                                    overlapConflict.GetArea() > GeometryAreaToleranceSquareMetres)
+                                using Geometry? exclusionConflict = coreVisible.Intersection(
+                                    rawLocalExclusions);
+                                if (exclusionConflict is not null &&
+                                    exclusionConflict.GetArea() > GeometryAreaToleranceSquareMetres)
                                 {
                                     throw new InvalidDataException(
                                         $"terrain section {coverageTiles[tileIndex].X},{coverageTiles[tileIndex].Z} " +
-                                        $"retained a visible-layer overlap for {orderedSources[sourceIndex].SourceId}");
+                                        $"retained an exclusion conflict for {orderedSources[sourceIndex].Source.SourceId}");
                                 }
                             }
-
-                            using Geometry? coreVisible = visible.Intersection(core);
-                            if (coreVisible is not null && !coreVisible.IsEmpty() &&
-                                coreVisible.GetArea() > GeometryAreaToleranceSquareMetres)
-                            {
-                                if (rawLocalExclusions is not null)
-                                {
-                                    using Geometry? exclusionConflict = coreVisible.Intersection(
-                                        rawLocalExclusions);
-                                    if (exclusionConflict is not null &&
-                                        exclusionConflict.GetArea() > GeometryAreaToleranceSquareMetres)
-                                    {
-                                        throw new InvalidDataException(
-                                            $"terrain section {coverageTiles[tileIndex].X},{coverageTiles[tileIndex].Z} " +
-                                            $"retained an exclusion conflict for {orderedSources[sourceIndex].SourceId}");
-                                    }
-                                }
-                                visibleBySource[sourceIndex] ??= new Geometry(wkbGeometryType.wkbMultiPolygon);
-                                AddPolygonParts(coreVisible, visibleBySource[sourceIndex]!);
-                            }
-
-                            using Geometry? expandedVisible = visible.Buffer(
-                                TerrainVegetationSeparationMetres,
-                                4);
-                            if (expandedVisible is null || expandedVisible.IsEmpty())
-                                throw new InvalidDataException(
-                                    $"could not create local vegetation clearance for {orderedSources[sourceIndex].SourceId}");
-                            using Geometry? visibleClearance = NormalizePolygonalOverlay(
-                                expandedVisible,
-                                TerrainOverlayPrecisionMetres);
-                            if (visibleClearance is null || visibleClearance.IsEmpty())
-                                throw new InvalidDataException(
-                                    $"local vegetation clearance produced no geometry for {orderedSources[sourceIndex].SourceId}");
-                            Geometry nextClaimed = claimedLocal is null
-                                ? visibleClearance.Clone()
-                                : UnionWithTopologyRetry(
-                                    claimedLocal,
-                                    visibleClearance,
-                                    $"local visible-layer clearance for {orderedSources[sourceIndex].SourceId}");
-                            claimedLocal?.Dispose();
-                            claimedLocal = nextClaimed;
+                            stage.Add("pieces", coreVisible, key: orderedSources[sourceIndex].Id);
                         }
-                    }
-                    finally
-                    {
-                        separatedLocalExclusions?.Dispose();
-                        rawLocalExclusions?.Dispose();
-                        claimedLocal?.Dispose();
-                    }
-                    tileProgress.Report(tileIndex + 1, "Terrain sections processed");
-                }
 
-                WriteOsmLogSubsection("POLYVEG FEATURE ASSEMBLY");
-                ProcessingCheckpoints assemblyProgress = new(orderedSources.Length);
-                using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None);
-                using Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Indented = true });
-                WriteHeader(writer, bufferMetres: 0.0);
-                for (int sourceIndex = 0; sourceIndex < orderedSources.Length; sourceIndex++)
+                        using Geometry? expandedVisible = visible.Buffer(
+                            TerrainVegetationSeparationMetres,
+                            4);
+                        if (expandedVisible is null || expandedVisible.IsEmpty())
+                            throw new InvalidDataException(
+                                $"could not create local vegetation clearance for {orderedSources[sourceIndex].Source.SourceId}");
+                        using Geometry? visibleClearance = NormalizePolygonalOverlay(
+                            expandedVisible,
+                            TerrainOverlayPrecisionMetres);
+                        if (visibleClearance is null || visibleClearance.IsEmpty())
+                            throw new InvalidDataException(
+                                $"local vegetation clearance produced no geometry for {orderedSources[sourceIndex].Source.SourceId}");
+                        Geometry nextClaimed = claimedLocal is null
+                            ? visibleClearance.Clone()
+                            : UnionWithTopologyRetry(
+                                claimedLocal,
+                                visibleClearance,
+                                $"local visible-layer clearance for {orderedSources[sourceIndex].Source.SourceId}");
+                        claimedLocal?.Dispose();
+                        claimedLocal = nextClaimed;
+                    }
+
+                }
+                finally
+                {
+                    foreach (var item in localSources) item.Source.ProjectedGeometry.Dispose();
+                    separatedLocalExclusions?.Dispose();
+                    rawLocalExclusions?.Dispose();
+                    claimedLocal?.Dispose();
+                }
+                stage.Flush();
+                tileProgress.Report(tileIndex + 1, "Terrain sections processed");
+            }
+
+            WriteOsmLogSubsection("POLYVEG FEATURE ASSEMBLY");
+            ProcessingCheckpoints assemblyProgress = new(stage.Count("sources"));
+            int assembled = 0;
+            int skippedDegenerate = 0;
+            using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None);
+            using Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Indented = true });
+            WriteHeader(writer, bufferMetres: 0.0);
+            foreach (var row in stage.Read("sources"))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                PolyVegSource source = JsonSerializer.Deserialize<PolyVegSource>(row.Payload)!;
+                SetDiagnosticContext("PolyVeg feature", $"{source.SourceId}; category={source.Category}");
+                using Geometry accumulated = new(wkbGeometryType.wkbMultiPolygon);
+                foreach (var piece in stage.Read("pieces", sourceKey: row.Id))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    PolyVegSource source = orderedSources[sourceIndex];
-                    Geometry? accumulated = visibleBySource[sourceIndex];
-                    if (accumulated is null || accumulated.IsEmpty())
-                    {
-                        assemblyProgress.Report(sourceIndex + 1, "PolyVeg features assembled");
-                        continue;
-                    }
-                    using Geometry? polygonal = AssembleVisiblePolygonParts(accumulated);
-                    if (polygonal is null || polygonal.IsEmpty() ||
-                        polygonal.GetArea() <= GeometryAreaToleranceSquareMetres)
-                    {
-                        assemblyProgress.Report(sourceIndex + 1, "PolyVeg features assembled");
-                        continue;
-                    }
-
-                    double originalArea = source.ProjectedGeometry.GetArea();
+                    AddPolygonParts(piece.Geometry, accumulated);
+                }
+                using Geometry? polygonal = accumulated.IsEmpty() ? null : AssembleVisiblePolygonParts(accumulated);
+                if (polygonal is not null && !polygonal.IsEmpty() && polygonal.GetArea() > GeometryAreaToleranceSquareMetres)
+                {
                     double plantableArea = polygonal.GetArea();
-                    using Geometry geographic = polygonal.Clone();
-                    geographic.Transform(toGeographic);
-                    CountPolygonParts(geographic, ref parts, ref holes);
-                    WritePolyVegFeature(writer, source, geographic, originalArea, plantableArea);
+                    int transformResult = polygonal.Transform(toGeographic);
+                    string? geometryJson = transformResult == 0
+                        ? PreparePolyVegGeometryJson(polygonal, toProjected)
+                        : null;
+                    if (geometryJson is null)
+                    {
+                        skippedDegenerate++;
+                        WriteOsmLogEntry($"WARNING: Skipping PolyVeg {source.SourceId} ({source.Category}): empty, non-finite, or negligible area after geographic export; projected area={plantableArea:G17} m².");
+                        assemblyProgress.Report(++assembled, "PolyVeg features assembled");
+                        continue;
+                    }
+                    CountPolygonParts(polygonal, ref parts, ref holes);
+                    WritePolyVegFeature(writer, source, geometryJson, source.OriginalArea, plantableArea);
                     categoryCounts[source.Category]++;
                     written++;
-                    assemblyProgress.Report(sourceIndex + 1, "PolyVeg features assembled");
+                    writer.Flush();
                 }
-
-                writer.WriteEndArray();
-                writer.WriteEndObject();
-                writer.Flush();
-                stream.Flush(true);
+                assemblyProgress.Report(++assembled, "PolyVeg features assembled");
             }
-            finally
-            {
-                foreach (Geometry? geometry in normalizedSources) geometry?.Dispose();
-                foreach (Geometry? geometry in visibleBySource) geometry?.Dispose();
-            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+            writer.Flush();
+            stream.Flush(true);
+            if (skippedDegenerate > 0)
+                WriteOsmLogEntry($"WARNING: Skipped {skippedDegenerate:N0} degenerate PolyVeg feature(s); retained {written:N0} valid feature(s).");
             return (written, parts, holes);
+        }
+
+        // Check the exact serialized coordinates before writing or counting a feature.
+        // Geographic export/round-trip rounding can collapse very small overlay remnants.
+        private static string? PreparePolyVegGeometryJson(
+            Geometry geographicGeometry, CoordinateTransformation toProjected)
+        {
+            string json = geographicGeometry.ExportToJson(null);
+            using Geometry? roundTrip = Ogr.CreateGeometryFromJson(json);
+            if (roundTrip is null || roundTrip.IsEmpty() || roundTrip.Transform(toProjected) != 0)
+                return null;
+            double area = roundTrip.GetArea();
+            return double.IsFinite(area) && area > GeometryAreaToleranceSquareMetres ? json : null;
         }
 
         private Geometry BuildProjectedTileCoverage(WorldTile tile)
@@ -876,14 +868,15 @@ internal static partial class Program
         private int WritePolyVegExclusions(string path)
         {
             int written = 0;
-            ProcessingCheckpoints progress = new(polyVegExclusions.Count);
+            ProcessingCheckpoints progress = new(stage.Count("exclusions"));
             using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None);
             using Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Indented = true });
             WriteHeader(writer, bufferMetres: 0.0);
-            foreach (PolyVegExclusion exclusion in polyVegExclusions)
+            foreach (var row in stage.Read("exclusions"))
             {
+                PolyVegExclusion exclusion = JsonSerializer.Deserialize<PolyVegExclusion>(row.Payload)!;
                 cancellationToken.ThrowIfCancellationRequested();
-                using Geometry geometry = exclusion.ProjectedGeometry.Clone();
+                using Geometry geometry = row.Geometry.Clone();
                 geometry.Transform(toGeographic);
                 writer.WriteStartObject();
                 writer.WriteString("type", "Feature");
@@ -896,6 +889,7 @@ internal static partial class Program
                 geometryJson.RootElement.WriteTo(writer);
                 writer.WriteEndObject();
                 written++;
+                writer.Flush();
                 progress.Report(written, "PolyVeg exclusions written");
             }
 
@@ -909,7 +903,7 @@ internal static partial class Program
         private static void WritePolyVegFeature(
             Utf8JsonWriter writer,
             PolyVegSource source,
-            Geometry geometry,
+            string geometryJson,
             double originalArea,
             double plantableArea)
         {
@@ -941,8 +935,7 @@ internal static partial class Program
             writer.WriteNumber("excludedAreaSquareMetres", Math.Max(0.0, originalArea - plantableArea));
             writer.WriteEndObject();
             writer.WritePropertyName("geometry");
-            using JsonDocument geometryJson = JsonDocument.Parse(geometry.ExportToJson(null));
-            geometryJson.RootElement.WriteTo(writer);
+            writer.WriteRawValue(geometryJson);
             writer.WriteEndObject();
         }
 
@@ -993,7 +986,7 @@ internal static partial class Program
                     Geometry? normalized = ExtractGeometryFamily(clipped, polygons: true);
                     if (normalized is not null)
                     {
-                        routeVectorFeatures.Add(new RouteVectorFeature(layer, properties, normalized));
+                        StageVector(new RouteVectorFeature(layer, properties, normalized));
                     }
                 }
             }
@@ -1022,7 +1015,7 @@ internal static partial class Program
                 Geometry? normalized = ExtractGeometryFamily(clipped, polygons: false);
                 if (normalized is not null)
                 {
-                    routeVectorFeatures.Add(new RouteVectorFeature(layer, properties, normalized));
+                    StageVector(new RouteVectorFeature(layer, properties, normalized));
                 }
             }
         }
@@ -1068,7 +1061,9 @@ internal static partial class Program
             polyVegProperties["derivedGeometry"] = "line_buffer";
             polyVegProperties["derivedWidthMetres"] = TreeRowWidthMetres.ToString(
                 "0.###", System.Globalization.CultureInfo.InvariantCulture);
-            polyVegSources.Add(new PolyVegSource(
+            Geometry geographic = normalized.Clone();
+            geographic.Transform(toGeographic);
+            StageSource(new PolyVegSource(
                 sourceId,
                 "woodland",
                 "natural=tree_row",
@@ -1080,9 +1075,7 @@ internal static partial class Program
                 normalized));
             polyVegSourceCount++;
 
-            Geometry geographic = normalized.Clone();
-            geographic.Transform(toGeographic);
-            routeVectorFeatures.Add(new RouteVectorFeature(
+            StageVector(new RouteVectorFeature(
                 "habitat_woodland",
                 RouteProperties(feature, "way"),
                 geographic));
@@ -1102,7 +1095,7 @@ internal static partial class Program
             using DataSource dataSource = driver.CreateDataSource(path, [])
                 ?? throw new InvalidOperationException("GDAL could not create the route GeoPackage");
             Dictionary<string, Layer> layers = new(StringComparer.Ordinal);
-            ProcessingCheckpoints writtenProgress = new(routeVectorFeatures.Count);
+            ProcessingCheckpoints writtenProgress = new(stage.Count("vectors"));
             int totalWritten = 0;
             try
             {
@@ -1127,8 +1120,11 @@ internal static partial class Program
                     layers.Add(layerName, layer);
                 }
 
-                foreach (RouteVectorFeature source in routeVectorFeatures)
+                if (dataSource.StartTransaction(0) != 0)
+                    throw new IOException("Could not start route GeoPackage transaction");
+                foreach (var row in stage.Read("vectors"))
                 {
+                    RouteVectorFeature source = JsonSerializer.Deserialize<RouteVectorFeature>(row.Payload)!;
                     cancellationToken.ThrowIfCancellationRequested();
                     Layer layer = layers[source.LayerName];
                     using Feature output = new(layer.GetLayerDefn());
@@ -1136,16 +1132,21 @@ internal static partial class Program
                     {
                         output.SetField(name, value);
                     }
-                    output.SetGeometry(source.Geometry);
+                    output.SetGeometry(row.Geometry);
                     if (layer.CreateFeature(output) != 0)
                     {
                         throw new InvalidOperationException($"GDAL could not write a {source.LayerName} route feature");
                     }
                     counts[source.LayerName]++;
                     totalWritten++;
+                    if (totalWritten % 2048 == 0 &&
+                        (dataSource.CommitTransaction() != 0 || dataSource.StartTransaction(0) != 0))
+                        throw new IOException("Could not checkpoint route GeoPackage");
                     writtenProgress.Report(totalWritten, "GeoPackage features written");
                 }
 
+                if (dataSource.CommitTransaction() != 0)
+                    throw new IOException("Could not finish route GeoPackage transaction");
                 foreach (Layer layer in layers.Values)
                 {
                     layer.SyncToDisk();
@@ -1407,7 +1408,7 @@ internal static partial class Program
             return false;
         }
 
-        private static bool IsPolyVegDerivativeCurrent(string outputPath, string sourcePbfPath, string fingerprint)
+        private static bool IsPolyVegDerivativeCurrent(string outputPath, string sourcePbfPath, string fingerprint, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -1416,7 +1417,8 @@ internal static partial class Program
                     return false;
                 }
 
-                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(outputPath));
+                var (header, _) = ReadGeoJsonFeatures(outputPath, cancellationToken: cancellationToken);
+                using JsonDocument document = JsonSerializer.SerializeToDocument(header);
                 JsonElement root = document.RootElement;
                 if (!root.TryGetProperty("schemaVersion", out JsonElement schema) || schema.GetInt32() != SchemaVersion ||
                     !root.TryGetProperty("generatorRevision", out JsonElement revision) || revision.GetInt32() != GeneratorRevision ||
@@ -1628,16 +1630,20 @@ internal static partial class Program
             {
                 throw new InvalidDataException("synthetic PolyVeg exclusion derivative is incorrect");
             }
-            using DataSource package = Ogr.Open(geopackagePath, 0)
-                ?? throw new InvalidDataException("synthetic route GeoPackage could not be reopened");
-            using Layer woodland = package.GetLayerByName("habitat_woodland")
-                ?? throw new InvalidDataException("synthetic woodland layer is missing");
-            using Layer roads = package.GetLayerByName("roads")
-                ?? throw new InvalidDataException("synthetic roads layer is missing");
-            if (woodland.GetFeatureCount(1) != 2 || roads.GetFeatureCount(1) != 2)
             {
-                throw new InvalidDataException("synthetic categorized layer counts are incorrect");
+                using DataSource package = Ogr.Open(geopackagePath, 0)
+                    ?? throw new InvalidDataException("synthetic route GeoPackage could not be reopened");
+                using Layer woodland = package.GetLayerByName("habitat_woodland")
+                    ?? throw new InvalidDataException("synthetic woodland layer is missing");
+                using Layer roads = package.GetLayerByName("roads")
+                    ?? throw new InvalidDataException("synthetic roads layer is missing");
+                if (woodland.GetFeatureCount(1) != 2 || roads.GetFeatureCount(1) != 2)
+                {
+                    throw new InvalidDataException("synthetic categorized layer counts are incorrect");
+                }
             }
+            RunMapWindowProbe(route, mapper, compactSourcePath, sourcePath);
+            RunSectionBoundaryProbe(route, mapper, sourcePath);
         }
 
         private static void CreateSyntheticOsmSource(
@@ -1729,31 +1735,30 @@ internal static partial class Program
             }
         }
 
-        private static void ValidatePolyVegPolygons(
+        private static void ValidateCollectionHeader(
+            Dictionary<string, JsonElement> header, string fingerprint, int count, int expected)
+        {
+            if (header["type"].GetString() != "FeatureCollection" ||
+                header["schemaVersion"].GetInt32() != SchemaVersion ||
+                header["generatorRevision"].GetInt32() != GeneratorRevision ||
+                !string.Equals(header["routeCoverage"].GetProperty("terrainTileFingerprint").GetString(), fingerprint, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(header["routeCoverage"].GetProperty("crs").GetString(), "EPSG:4326", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(header["crs"].GetProperty("properties").GetProperty("name").GetString(), "EPSG:4326", StringComparison.OrdinalIgnoreCase) || count != expected)
+                throw new InvalidDataException("PolyVeg collection metadata or feature count failed validation");
+        }
+
+        private void ValidatePolyVegPolygons(
             string path,
             string expectedFingerprint,
             int expectedFeatures,
             IReadOnlyDictionary<string, int> expectedCategoryCounts,
             CoordinateTransformation toProjected)
         {
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
-            JsonElement root = document.RootElement;
-            if (!string.Equals(root.GetProperty("type").GetString(), "FeatureCollection", StringComparison.Ordinal) ||
-                root.GetProperty("schemaVersion").GetInt32() != SchemaVersion ||
-                root.GetProperty("generatorRevision").GetInt32() != GeneratorRevision ||
-                !string.Equals(root.GetProperty("routeCoverage").GetProperty("terrainTileFingerprint").GetString(), expectedFingerprint, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(root.GetProperty("routeCoverage").GetProperty("crs").GetString(), "EPSG:4326", StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(root.GetProperty("crs").GetProperty("properties").GetProperty("name").GetString(), "EPSG:4326", StringComparison.OrdinalIgnoreCase) ||
-                root.GetProperty("features").GetArrayLength() != expectedFeatures)
-            {
-                throw new InvalidDataException("PolyVeg polygon derivative failed collection validation");
-            }
-
             Dictionary<string, int> actualCategoryCounts = PolyVegCategoryNames.ToDictionary(
                 category => category, _ => 0, StringComparer.Ordinal);
-            ProcessingCheckpoints propertyProgress = new(expectedFeatures);
-            int propertiesChecked = 0;
-            foreach (JsonElement feature in root.GetProperty("features").EnumerateArray())
+            ProcessingCheckpoints progress = new(expectedFeatures);
+            int checkedFeatures = 0;
+            var (header, count) = ReadGeoJsonFeatures(path, feature =>
             {
                 JsonElement properties = feature.GetProperty("properties");
                 string category = properties.GetProperty("category").GetString() ?? "";
@@ -1771,41 +1776,20 @@ internal static partial class Program
                 {
                     throw new InvalidDataException("PolyVeg polygon feature failed required-property or geometry validation");
                 }
+                using Geometry geometry = Ogr.CreateGeometryFromJson(feature.GetProperty("geometry").GetRawText())
+                    ?? throw new InvalidDataException("PolyVeg polygon has unreadable geometry");
+                int transformResult = geometry.Transform(toProjected);
+                double area = geometry.GetArea();
+                if (transformResult != 0 || geometry.IsEmpty() || !double.IsFinite(area) || area <= GeometryAreaToleranceSquareMetres)
+                    throw new InvalidDataException($"PolyVeg {sourceId} contains empty or zero-area geometry (area={area:G17} m²)");
                 actualCategoryCounts[category]++;
-                propertiesChecked++;
-                propertyProgress.Report(propertiesChecked, "PolyVeg properties validated");
-            }
-            foreach ((string category, int expectedCount) in expectedCategoryCounts)
-            {
-                if (actualCategoryCounts[category] != expectedCount)
+                progress.Report(++checkedFeatures, "PolyVeg features validated");
+            }, cancellationToken);
+            ValidateCollectionHeader(header, expectedFingerprint, count, expectedFeatures);
+            foreach ((string category, int expected) in expectedCategoryCounts)
+                if (actualCategoryCounts[category] != expected)
                     throw new InvalidDataException($"PolyVeg polygon category count failed for {category}");
-            }
-
-            using DataSource dataSource = Ogr.Open(path, 0)
-                ?? throw new InvalidDataException("PolyVeg polygon GeoJSON could not be reopened by GDAL");
-            using Layer layer = dataSource.GetLayerByIndex(0)
-                ?? throw new InvalidDataException("PolyVeg polygon GeoJSON has no feature layer");
-            ProcessingCheckpoints geometryProgress = new(expectedFeatures);
-            int geometriesChecked = 0;
-            layer.ResetReading();
-            while (true)
-            {
-                using Feature? feature = layer.GetNextFeature();
-                if (feature is null) break;
-                using Geometry? sourceGeometry = feature.GetGeometryRef();
-                if (sourceGeometry is null || sourceGeometry.IsEmpty())
-                    throw new InvalidDataException("PolyVeg polygon contains empty geometry");
-                using Geometry projected = sourceGeometry.Clone();
-                projected.Transform(toProjected);
-                double area = projected.GetArea();
-                if (area <= GeometryAreaToleranceSquareMetres)
-                    throw new InvalidDataException("PolyVeg polygon contains zero-area geometry");
-                geometriesChecked++;
-                geometryProgress.Report(geometriesChecked, "PolyVeg geometries validated");
-            }
-            WriteOsmLogEntry(
-                "Exclusion and overlap topology validated within bounded terrain sections.",
-                indent: 4);
+            WriteOsmLogEntry("Exclusion and overlap topology validated within bounded terrain sections.", indent: 4);
         }
 
         private static bool ContainsPolygonHole(Geometry geometry)
@@ -1828,28 +1812,11 @@ internal static partial class Program
             if (File.Exists(backupPath)) File.Delete(backupPath);
         }
 
-        private static void ValidatePolyVegExclusions(
-            string path,
-            string expectedFingerprint,
-            int expectedFeatures)
+        private void ValidatePolyVegExclusions(string path, string expectedFingerprint, int expectedFeatures)
         {
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
-            JsonElement root = document.RootElement;
-            JsonElement features = root.GetProperty("features");
-            if (!string.Equals(root.GetProperty("type").GetString(), "FeatureCollection", StringComparison.Ordinal) ||
-                root.GetProperty("schemaVersion").GetInt32() != SchemaVersion ||
-                root.GetProperty("generatorRevision").GetInt32() != GeneratorRevision ||
-                !string.Equals(root.GetProperty("routeCoverage").GetProperty("terrainTileFingerprint").GetString(), expectedFingerprint, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(root.GetProperty("routeCoverage").GetProperty("crs").GetString(), "EPSG:4326", StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(root.GetProperty("crs").GetProperty("properties").GetProperty("name").GetString(), "EPSG:4326", StringComparison.OrdinalIgnoreCase) ||
-                features.GetArrayLength() != expectedFeatures)
-            {
-                throw new InvalidDataException("PolyVeg exclusion derivative failed validation");
-            }
-
             ProcessingCheckpoints progress = new(expectedFeatures);
             int checkedFeatures = 0;
-            foreach (JsonElement feature in features.EnumerateArray())
+            var (header, count) = ReadGeoJsonFeatures(path, feature =>
             {
                 if (!feature.TryGetProperty("id", out JsonElement id) ||
                     string.IsNullOrWhiteSpace(id.GetString()) ||
@@ -1860,9 +1827,9 @@ internal static partial class Program
                 {
                     throw new InvalidDataException("PolyVeg exclusion feature failed schema validation");
                 }
-                checkedFeatures++;
-                progress.Report(checkedFeatures, "PolyVeg exclusions validated");
-            }
+                progress.Report(++checkedFeatures, "PolyVeg exclusions validated");
+            }, cancellationToken);
+            ValidateCollectionHeader(header, expectedFingerprint, count, expectedFeatures);
         }
 
         private static Geometry BuildRouteCoverage(GeoTileMapper mapper, IReadOnlyList<WorldTile> tiles)
@@ -2079,7 +2046,7 @@ internal static partial class Program
                 }
                 if (snapped.IsValid())
                 {
-                    AddPolygonParts(snapped, exclusionPolygons);
+                    stage.Add("masks", snapped);
                     added = true;
                     return;
                 }
@@ -2091,7 +2058,7 @@ internal static partial class Program
                     return;
                 }
                 invalidGeometryRepairedCount++;
-                AddPolygonParts(repaired, exclusionPolygons);
+                stage.Add("masks", repaired);
                 added = true;
                 return;
             }

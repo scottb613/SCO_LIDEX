@@ -195,6 +195,7 @@ internal static partial class Program
 
                 failures.Add($"{representative.Name}: {(int)response.StatusCode} {response.ReasonPhrase}");
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex) when (ex is TaskCanceledException or HttpRequestException or InvalidOperationException)
             {
                 failures.Add($"{representative.Name}: {ex.Message}");

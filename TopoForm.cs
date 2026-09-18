@@ -120,6 +120,7 @@ internal sealed partial class TopoForm : Form
     private Program.ScanSummary? lastScanSummary;
     private TextWriter? previousOut;
     private TextWriter? previousError;
+    private readonly object logWriteLock = new();
     private StreamWriter? logFileWriter;
     private bool cacheExitDecisionMade;
     private bool operationFailed;
@@ -1591,6 +1592,7 @@ internal sealed partial class TopoForm : Form
         previousOut = Console.Out;
         previousError = Console.Error;
         logFileWriter = OpenLogFile();
+        Program.BeginDiagnostics("Scan", routePath);
         WriteRunSettingsHeader(routePath, "Scan");
         AppendLog(resolutionLog);
         using TextWriter writer = new UiTextWriter(AppendLog);
@@ -1631,8 +1633,9 @@ internal sealed partial class TopoForm : Form
                     : $"{Environment.NewLine}Scan passed. Run is enabled. Use Abort to unlock and change settings.{Environment.NewLine}"
                 : $"{Environment.NewLine}Scan failed. Fix blocking issues, then scan again.{Environment.NewLine}");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            Program.WriteFailureDiagnostics("Cancellation requested", ex);
             SetOperationMessage("SCAN ABORTED");
             AppendLog($"{Environment.NewLine}Scan aborted. Settings unlocked.{Environment.NewLine}");
             ResetScanState();
@@ -1641,14 +1644,18 @@ internal sealed partial class TopoForm : Form
         {
             SetOperationMessage("SCAN FAILED");
             AppendLog($"Error: {ex.Message}{Environment.NewLine}");
+            Program.WriteFailureDiagnostics("Operation failed", ex);
             scanPassed = false;
         }
         finally
         {
             Console.SetOut(previousOut);
             Console.SetError(previousError);
-            logFileWriter?.Dispose();
-            logFileWriter = null;
+            lock (logWriteLock)
+            {
+                logFileWriter?.Dispose();
+                logFileWriter = null;
+            }
             scanCancellation?.Dispose();
             scanCancellation = null;
             SetScanning(false);
@@ -1719,6 +1726,7 @@ internal sealed partial class TopoForm : Form
         previousOut = Console.Out;
         previousError = Console.Error;
         logFileWriter = OpenLogFile();
+        Program.BeginDiagnostics("Run", routePath);
         WriteRunSettingsHeader(routePath, "Run");
         AppendLog(runResolutionLog);
         using TextWriter writer = new UiTextWriter(AppendLog);
@@ -1733,8 +1741,9 @@ internal sealed partial class TopoForm : Form
             string[] args = BuildRunArguments(routePath);
             await Task.Run(() => Program.RunConsoleAsync(args, runCancellation.Token));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            Program.WriteFailureDiagnostics("Cancellation requested", ex);
             SetOperationMessage("OPERATION ABORTED");
             AppendLog(
                 $"{Environment.NewLine}OPERATION ABORTED{Environment.NewLine}" +
@@ -1745,6 +1754,7 @@ internal sealed partial class TopoForm : Form
         {
             SetOperationMessage("OPERATION FAILED");
             AppendLog($"Error: {ex.Message}{Environment.NewLine}");
+            Program.WriteFailureDiagnostics("Operation failed", ex);
         }
         finally
         {
@@ -1753,12 +1763,16 @@ internal sealed partial class TopoForm : Form
                 $"{Environment.NewLine}RUN TOTALS{Environment.NewLine}" +
                 $"----------{Environment.NewLine}" +
                 $"  ELAPSED: {FormatElapsed(runTimer.Elapsed)}{Environment.NewLine}" +
+                Program.FormatProcessMemoryDiagnostics() +
                 $"  USGS DATA READ: {Program.FormatUsgsDataBytesRead()}{Environment.NewLine}" +
                 $"  COPERNICUS DATA READ: {Program.FormatCopernicusDataBytesRead()}{Environment.NewLine}");
             Console.SetOut(previousOut);
             Console.SetError(previousError);
-            logFileWriter?.Dispose();
-            logFileWriter = null;
+            lock (logWriteLock)
+            {
+                logFileWriter?.Dispose();
+                logFileWriter = null;
+            }
             runCancellation.Dispose();
             runCancellation = null;
             ResetScanState();
@@ -1819,6 +1833,7 @@ internal sealed partial class TopoForm : Form
         previousOut = Console.Out;
         previousError = Console.Error;
         logFileWriter = OpenLogFile();
+        Program.BeginDiagnostics("Post Process", routePath);
         WriteRunSettingsHeader(routePath, "Post Process");
         using TextWriter writer = new UiTextWriter(AppendLog);
         Console.SetOut(writer);
@@ -1840,13 +1855,15 @@ internal sealed partial class TopoForm : Form
 
             await Task.Run(() => Program.PostProcessTerrainShiftAsync(routePath, options, eastWestShift, northSouthShift, runCancellation.Token));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            Program.WriteFailureDiagnostics("Cancellation requested", ex);
             AppendLog($"{Environment.NewLine}Post Process aborted.{Environment.NewLine}");
         }
         catch (Exception ex)
         {
             AppendLog($"Error: {ex.Message}{Environment.NewLine}");
+            Program.WriteFailureDiagnostics("Operation failed", ex);
         }
         finally
         {
@@ -1854,8 +1871,11 @@ internal sealed partial class TopoForm : Form
             AppendLog($"{Environment.NewLine}Elapsed time: {FormatElapsed(runTimer.Elapsed)}{Environment.NewLine}");
             Console.SetOut(previousOut);
             Console.SetError(previousError);
-            logFileWriter?.Dispose();
-            logFileWriter = null;
+            lock (logWriteLock)
+            {
+                logFileWriter?.Dispose();
+                logFileWriter = null;
+            }
             runCancellation.Dispose();
             runCancellation = null;
             ResetScanState();
@@ -2179,6 +2199,7 @@ internal sealed partial class TopoForm : Form
         settings.AppendLine($"  TERRAIN OUTPUT: {(experimentalOutput.Checked ? "HD Test - 4m Tiles" : "Normal - 8m Tiles")}");
         settings.AppendLine($"  SELECTION: {GetSelectionText()}");
         settings.AppendLine();
+        settings.AppendLine(Program.FormatSystemDiagnostics());
         settings.AppendLine("  OUTPUTS");
         settings.AppendLine("  -------");
         settings.AppendLine($"    • Route Tiles: {YesNo(createRouteTiles.Checked)}");
@@ -2464,6 +2485,20 @@ internal sealed partial class TopoForm : Form
 
     private void AppendLog(string text)
     {
+        // Persist on the producing thread before scheduling UI display.
+        if (!IsInternalStatusControlText(text))
+        {
+            lock (logWriteLock)
+            {
+                logFileWriter?.Write(text);
+                logFileWriter?.Flush();
+            }
+        }
+        AppendLogToUi(text);
+    }
+
+    private void AppendLogToUi(string text)
+    {
         if (IsDisposed)
         {
             return;
@@ -2471,7 +2506,7 @@ internal sealed partial class TopoForm : Form
 
         if (InvokeRequired)
         {
-            BeginInvoke(() => AppendLog(text));
+            BeginInvoke(() => AppendLogToUi(text));
             return;
         }
 
@@ -2482,8 +2517,6 @@ internal sealed partial class TopoForm : Form
         }
 
         logText.AppendText(text);
-        logFileWriter?.Write(text);
-        logFileWriter?.Flush();
         TrackStatusText(text);
     }
 

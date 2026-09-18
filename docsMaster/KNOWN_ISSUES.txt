@@ -39,3 +39,17 @@ SCO LIDEX Known Issues
 
 - Scan Override bypasses preflight checks. It is intended for advanced retry or
   known-good cases, not first-time route validation.
+
+- OSM / PolyVeg processing uses temporary disk staging under route osm_data.
+  Leave enough free space for the staging GeoPackage and new output set.
+  Memory still depends on geometry density within a section and the largest
+  single source feature, which must be assembled as one logical PolyVeg feature.
+  TDB/map tile selection does not reduce PolyVeg coverage: all existing normal
+  terrain tiles belong to the route handoff.
+
+Failure diagnostics:
+Handled exceptions and cancellation include support diagnostics in the active
+log. Failures trigger bounded read-only file/storage checks. Last-observed
+context may belong to another concurrent worker; exception data identifies the
+exact map worker where available. Forced termination, power loss, and native
+crashes can prevent a final report; log text is flushed before UI display.

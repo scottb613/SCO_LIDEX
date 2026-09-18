@@ -133,9 +133,13 @@ internal static partial class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+            WriteFailureDiagnostics("Unhandled exception; process terminating=" + eventArgs.IsTerminating,
+                eventArgs.ExceptionObject as Exception);
         if (args.Contains("--gui", StringComparer.OrdinalIgnoreCase))
         {
             ApplicationConfiguration.Initialize();
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             using Mutex singleInstance = new(false, @"Local\SCO-LIDEX-GUI");
             if (!singleInstance.WaitOne(0))
             {
@@ -153,6 +157,7 @@ internal static partial class Program
             }
             catch (Exception ex)
             {
+                WriteFailureDiagnostics("Unhandled GUI/startup failure", ex);
                 WriteStartupErrorLog(ex);
                 StyledMessageDialog.Show(
                     $"SCO LIDEX could not start. Details were written to:{Environment.NewLine}{GetStartupErrorLogPath()}",
@@ -164,12 +169,23 @@ internal static partial class Program
             return;
         }
 
-        RunCommandLineAsync(args).GetAwaiter().GetResult();
+        BeginDiagnostics("Command line", "See command output for route");
+        try { RunCommandLineAsync(args).GetAwaiter().GetResult(); }
+        catch (Exception ex)
+        {
+            WriteFailureDiagnostics("Command-line operation failed", ex);
+            Environment.ExitCode = 1;
+        }
     }
 
     private static async Task RunCommandLineAsync(string[] args)
     {
         AttachConsoleForCommandLine();
+        if (args.Contains("--failure-diagnostics-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunFailureDiagnosticsProbe();
+            return;
+        }
         if (args.Contains("--copernicus-probe", StringComparer.OrdinalIgnoreCase))
         {
             await RunCopernicusProbeAsync(args);
@@ -179,6 +195,18 @@ internal static partial class Program
         if (args.Contains("--map-probe", StringComparer.OrdinalIgnoreCase))
         {
             await RunMapTileProbeAsync(args, CancellationToken.None);
+            return;
+        }
+
+        if (args.Contains("--scan-coverage-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            await RunScanCoverageProbeAsync(args);
+            return;
+        }
+
+        if (args.Contains("--osm-streaming-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunOsmStreamingProbe();
             return;
         }
 
@@ -326,6 +354,7 @@ internal static partial class Program
 
     private static void WriteLogBanner(string title)
     {
+        SetDiagnosticContext("Stage", title);
         string heading = title.Trim().ToUpperInvariant();
         string rule = new('=', Math.Max(heading.Length, 32));
         Console.WriteLine(rule);
@@ -336,6 +365,7 @@ internal static partial class Program
 
     private static void WriteLogSection(string title)
     {
+        SetDiagnosticContext("Stage", title);
         string heading = title.Trim().ToUpperInvariant();
         Console.WriteLine();
         Console.WriteLine(heading);
@@ -344,6 +374,7 @@ internal static partial class Program
 
     private static void WriteLogSubsection(string title)
     {
+        SetDiagnosticContext("Stage", title);
         string heading = title.Trim().ToUpperInvariant();
         Console.WriteLine();
         Console.WriteLine($"  {heading}");
@@ -362,6 +393,7 @@ internal static partial class Program
 
     private static void WriteOperationAborted()
     {
+        WriteFailureDiagnostics("Cancellation reached a safe operation boundary");
         WriteLogSection("Operation Aborted");
         WriteLogDetail("Result", "STOPPED SAFELY");
         WriteLogDetail(
@@ -493,6 +525,7 @@ internal static partial class Program
             return;
         }
 
+        SetDiagnosticContext("Route", routeDir);
         int selectionSources = new[] { markerCoverage, trackDatabaseCoverage, kmlCoverage, textFileCoverage }.Count(v => v);
         if (selectionSources > 1)
         {
@@ -509,6 +542,7 @@ internal static partial class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Error: failed while creating marker coverage tiles: {ex.Message}");
+                WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
                 return;
             }
         }
@@ -521,6 +555,7 @@ internal static partial class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Error: failed while creating track database coverage tiles: {ex.Message}");
+                WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
                 return;
             }
         }
@@ -533,6 +568,7 @@ internal static partial class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Error: failed while creating KML coverage tiles: {ex.Message}");
+                WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
                 return;
             }
         }
@@ -545,6 +581,7 @@ internal static partial class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Error: failed while creating text-file coverage tiles: {ex.Message}");
+                WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
                 return;
             }
         }
@@ -943,6 +980,7 @@ internal static partial class Program
                 }
                 catch (Exception ex)
                 {
+                    WriteFailureDiagnostics($"Terrain generation failed: {tile.TileFile.FullName}", ex);
                     failed++;
                     retryableFailedNormalTileNames.Add(GetTerrainTileBaseName(tile));
                     MarkTerrainTileForAppendRetry(tile);
@@ -965,6 +1003,7 @@ internal static partial class Program
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Error: failed while writing generated terrain files: {ex.Message}");
+                    WriteFailureDiagnostics($"Terrain output write failed: {outputDir}", ex);
                     return;
                 }
             }
@@ -1162,6 +1201,7 @@ internal static partial class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Error: selection scan failed: {ex.Message}");
+                WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
                 blockingFailure = true;
             }
 
@@ -1304,6 +1344,7 @@ internal static partial class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Error: Distant Mountain selection scan failed: {ex.Message}");
+                WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
                 blockingFailure = true;
             }
 
@@ -1366,6 +1407,7 @@ internal static partial class Program
         else
         {
             PrintProjectionSummary(mapper);
+            hasWarnings |= WarnAboutIsolatedRouteTiles(route!, mapper);
             if (options.CreateMapTiles)
             {
                 try
@@ -1382,57 +1424,47 @@ internal static partial class Program
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Map source: FAILED ({ex.Message}).");
+                    WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
                     mapSource = new MapSourceAvailability(false, false, true, ex.Message);
                     hasWarnings = true;
                 }
             }
 
             WriteLogSection("Representative Source Checks");
+            WriteLogDetail("Scope", "Up to five spread-out locations per terrain stage. A successful sample enables that source; this does not guarantee coverage for every tile.");
             using HttpClient httpClient = new() { Timeout = TimeSpan.FromSeconds(45) };
-            GeoSampleGrid? sourceGrid = null;
-            if (options.CreateRouteTiles && processingTiles.FirstOrDefault(t => t.WorldTile is not null) is TerrainTile firstTile)
+            SampledScanAvailability normal = SampledScanAvailability.Empty;
+            SampledScanAvailability mountains = SampledScanAvailability.Empty;
+            if (options.CreateRouteTiles)
             {
-                sourceGrid = mapper.GetSampleGrid(firstTile.WorldTile!, 0, 0, 1, 1, 0, 0);
+                WriteLogDetail("Stage", "Normal terrain");
+                normal = await CheckScanLocationsAsync(httpClient, mapper,
+                    SelectScanLocations(processingTiles.Where(t => t.WorldTile is not null)
+                        .Select(t => new ScanLocation(t.WorldTile!.X, t.WorldTile.Z))),
+                    includeUsgs: true, cancellationToken);
             }
-            else if (options.CreateDistantMountains && dmCoverage.Count > 0)
+            if (options.CreateDistantMountains)
             {
-                LoTileCoordinate loTile = dmCoverage.OrderBy(t => t.X).ThenBy(t => t.Z).First();
-                sourceGrid = mapper.GetAreaSampleGrid(
-                    loTile.X + ((LoTileNormalTileSpan - 1) / 2.0),
-                    loTile.Z + ((LoTileNormalTileSpan - 1) / 2.0),
-                    LoTileSizeMeters,
-                    LoTileSizeMeters,
-                    LoRawGridSize,
-                    0,
-                    0,
-                    0,
-                    0);
+                WriteLogDetail("Stage", "Distant Mountains (Copernicus only)");
+                mountains = await CheckScanLocationsAsync(httpClient, mapper,
+                    SelectScanLocations(dmCoverage.Select(t => new ScanLocation(t.X, t.Z, Distant: true))),
+                    includeUsgs: false, cancellationToken);
             }
-
-            if (sourceGrid is not null)
-            {
-                if (options.CreateRouteTiles)
+            primaryStatus = normal.Sources.Primary;
+            intermediateStatus = normal.Sources.Intermediate;
+            fallbackStatus = normal.Sources.Fallback;
+            globalStatus = new SourceAvailability(
+                normal.Sources.Global.ServiceAvailable || mountains.Sources.Global.ServiceAvailable,
+                normal.Sources.Policy.UseGlobal || mountains.Sources.Policy.UseGlobal,
+                string.Join("; ", new[]
                 {
-                    primaryStatus = await TestUsgsDatasetAsync(httpClient, sourceGrid, PrimaryDemDataset, cancellationToken);
-                    intermediateStatus = await TestUsgsDatasetAsync(httpClient, sourceGrid, IntermediateDemDataset, cancellationToken);
-                    fallbackStatus = await TestUsgsDatasetAsync(httpClient, sourceGrid, FallbackDemDataset, cancellationToken);
-                }
-                if (options.CreateRouteTiles || options.CreateDistantMountains)
-                {
-                    globalStatus = await TestCopernicusDatasetAsync(httpClient, sourceGrid, cancellationToken);
-                }
-                demSources = new DemSourcePolicy(
-                    primaryStatus.ServiceAvailable && primaryStatus.ItemCount > 0,
-                    intermediateStatus.ServiceAvailable && intermediateStatus.ItemCount > 0,
-                    fallbackStatus.ServiceAvailable && fallbackStatus.ItemCount > 0,
-                    globalStatus.ServiceAvailable && globalStatus.CoverageAvailable);
-                hasWarnings |= options.CreateRouteTiles &&
-                    (!demSources.UsePrimary || !demSources.UseIntermediate || !demSources.UseFallback || !demSources.UseGlobal);
-                hasWarnings |= options.CreateDistantMountains && !demSources.UseGlobal;
-            }
-
-            routeCanRun = options.CreateRouteTiles && demSources.HasAny;
-            distantMountainCanRun = options.CreateDistantMountains && demSources.UseGlobal;
+                    options.CreateRouteTiles ? "Normal terrain: " + normal.Sources.Global.Detail : null,
+                    options.CreateDistantMountains ? "Distant Mountains: " + mountains.Sources.Global.Detail : null,
+                }.Where(s => s is not null)));
+            demSources = normal.Sources.Policy with { UseGlobal = globalStatus.CoverageAvailable };
+            hasWarnings |= normal.HasGaps || mountains.HasGaps;
+            routeCanRun = options.CreateRouteTiles && normal.Sources.Policy.HasAny;
+            distantMountainCanRun = options.CreateDistantMountains && mountains.Sources.Policy.UseGlobal;
         }
 
         bool anySelectedStageCanRun = routeCanRun || distantMountainCanRun || (options.CreateMapTiles && mapSource.CanRun);
@@ -1676,6 +1708,7 @@ internal static partial class Program
             {
                 failed++;
                 Console.WriteLine($"  -> Failed writing {tile.TileFile.Name}: could not read terrain sample encoding.");
+                WriteFailureDiagnostics("Stage failure; could not read terrain sample encoding");
                 continue;
             }
 
@@ -1696,6 +1729,7 @@ internal static partial class Program
             {
                 failed++;
                 Console.WriteLine($"  -> Failed writing {tile.TileFile.Name}: {ex.Message}");
+                WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
             }
         }
 
@@ -1821,6 +1855,7 @@ internal static partial class Program
             {
                 failed++;
                 Console.WriteLine($"  -> Failed writing {loName}.t: could not read terrain sample encoding.");
+                WriteFailureDiagnostics("Stage failure; could not read terrain sample encoding");
                 continue;
             }
 
@@ -1834,6 +1869,7 @@ internal static partial class Program
             {
                 failed++;
                 Console.WriteLine($"  -> Failed writing {loName}.t: {ex.Message}");
+                WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
             }
         }
 
@@ -2147,6 +2183,7 @@ internal static partial class Program
             Console.WriteLine($"USGS {GetDemSourceDisplayName(datasetName)}: active, {itemCount:N0} product(s) for representative bbox.");
             return new UsgsDatasetAvailability(true, itemCount, $"active, {itemCount:N0} representative product(s)");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) when (ex is TaskCanceledException or HttpRequestException or JsonException or InvalidOperationException)
         {
             Console.WriteLine($"USGS {GetDemSourceDisplayName(datasetName)}: FAILED ({ex.Message}).");
@@ -2169,8 +2206,8 @@ internal static partial class Program
         }
 
         return status.ItemCount > 0
-            ? $"SERVICE ONLINE / ROUTE COVERAGE AVAILABLE; {status.ItemCount:N0} representative product(s); {(enabledForRun ? "enabled for Run" : "not used")}."
-            : "SERVICE ONLINE / NO ROUTE COVERAGE; disabled for Run and will not be polled tile by tile.";
+            ? $"SERVICE ONLINE / SAMPLED COVERAGE AVAILABLE; {(enabledForRun ? "enabled for Run" : "not used")}. {status.Detail}"
+            : $"SERVICE ONLINE / NO COVERAGE FOUND AT SAMPLED LOCATIONS; disabled for Run. {status.Detail}";
     }
 
     private static string FormatUsgsRunDetail(bool enabledForRun, bool serviceAvailable) =>

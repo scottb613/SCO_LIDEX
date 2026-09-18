@@ -10,10 +10,38 @@ and writes terrain back into an existing route.
 The exact planting handoff is documented in
 docsMaster\POLYVEG-GEODATA-CONTRACT-v2.txt.
 
-Current version: v1.401 HOTFIX.
+Current version: v1.500.
 
 Release highlights
 ==================
+
+v1.500 - Bounded-memory OSM / PolyVeg processing
+----------------------------------------------
+
+- Scan checks up to five spread-out locations for normal terrain and separately
+  for Distant Mountains. Coverage at one location remains usable when another
+  sampled location is uncovered or unavailable. DM-only checks use Copernicus.
+- Scan warns about small, remote terrain groups with filenames and coordinates.
+  It does not remove tiles or guarantee coverage everywhere; Run continues to
+  report individual tile failures. Source checks honor cancellation.
+- Stages OSM source geometry, permanent exclusions, categorized features, and
+  section fragments in a temporary spatially indexed GeoPackage instead of
+  retaining the complete route in memory.
+- Builds exclusion unions and visible PolyVeg surfaces per terrain section,
+  preserving draw order, vegetation clearance, source identities, and holes.
+  Reassembles and writes one source feature at a time.
+- Streams GeoJSON validation and cache checks one feature at a time, fixing the
+  memory failure while validating large PolyVeg exclusion files.
+- Loads map geometry per tile with at most two concurrent renders.
+- Skips empty or negligible-area PolyVeg features after checking their exported
+  coordinates, logging source IDs, categories, areas, and a skipped-feature total.
+- Adds CPU and RAM details to settings logs and current/peak process memory to
+  run summaries. Failure and cancellation reports retain stage, source, output,
+  exception, and stack-trace details; failures include bounded read-only storage
+  checks to help diagnose route or disk problems.
+- Retains the four-file PolyVeg handoff and validates all outputs before
+  promotion. Temporary staging requires free disk space in route osm_data and
+  is removed on completion, cancellation, or a handled failure.
 
 v1.401 - HOTFIX
 ---------------
@@ -240,7 +268,7 @@ v1.100 - Additional work
 Installation
 ============
 
-1. Download SCOLIDEX-v1.401-win-x64.zip from the GitHub release.
+1. Download SCOLIDEX-v1.500-win-x64.zip from the GitHub release.
 2. Extract the complete archive to a writable folder.
 3. Run SCOLIDEX-win-x64\SCOLIDEX.exe.
 4. Optionally run AddShortcutDesktop.cmd from the extracted top-level folder.
