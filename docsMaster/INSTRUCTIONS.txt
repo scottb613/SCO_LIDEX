@@ -71,13 +71,14 @@ Enable HD Map Tiles:
   Creates 4096x4096 map PNGs instead of the default 2048x2048 size.
 
 Scan behavior:
+  The live Skip counter counts tile skip events, not Scan exception summaries.
   Scan is read-only. When Create Route Tiles is selected, it reports mixed 8m
   and 4m terrain and records approved conversion for Run. When Create Route
   Tiles is off, terrain resolution is not inspected because route terrain is
   outside the selected work.
 
-  Scan selects the smallest Geofabrik regional extract that covers the route,
-  reports its current download size/date, verifies the bundled OSM/PBF driver,
+  Scan selects regional Geofabrik extracts that together cover the route,
+  reports their download sizes/dates, verifies the bundled OSM/PBF driver,
   and checks map/terrain coordinate round trips and output names. Scan does not
   download the regional PBF or modify the route.
 

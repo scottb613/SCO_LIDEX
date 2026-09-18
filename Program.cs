@@ -452,6 +452,23 @@ internal static partial class Program
             throw new InvalidDataException("human-friendly log formatting probe failed");
         }
 
+        string[] summaries =
+        [
+            "  TILE EXCEPTIONS SKIPPED: 0",
+            "  TILE EXCEPTIONS SKIPPED: 3",
+            "  TILE EXCEPTION - SKIPPED: unreadable terrain",
+            "  DETAILS: Skipped: lo_tile files already exist",
+        ];
+        if (summaries.Any(line => TopoForm.IsTileSkipStatus(line)) ||
+            !TopoForm.IsTileSkipStatus("  SKIPPED: raw grid already has 65,536 valid height samples") ||
+            !TopoForm.IsTileSkipStatus("  Skipped: 4m raw grid already has 262,144 valid height samples") ||
+            !TopoForm.IsTileSkipStatus("  SKIPPED: lo_tile files already exist", "lo_tile files already exist") ||
+            !TopoForm.IsTileSkipStatus("  Skipped: lo_tile raw grid already has 256 valid height samples", "lo_tile raw grid already has"))
+        {
+            throw new InvalidDataException("Tile skip status must count events, not summaries or diagnostics.");
+        }
+
+        Console.WriteLine("Tile skip status probe: PASSED (summary counts 0 and 3; normal, HD, and DM events)");
         Console.Write(output);
         Console.WriteLine("Log format probe: PASSED");
     }

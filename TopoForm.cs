@@ -2615,6 +2615,9 @@ internal sealed partial class TopoForm : Form
 
     // The engine logs plain text; the GUI listens for stable progress/summary
     // phrases and updates live counters without coupling to engine internals.
+    internal static bool IsTileSkipStatus(string line, string detailPrefix = "") =>
+        line.TrimStart().StartsWith("Skipped: " + detailPrefix, StringComparison.OrdinalIgnoreCase);
+
     private void ProcessStatusLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
@@ -2665,8 +2668,8 @@ internal sealed partial class TopoForm : Form
             return;
         }
 
-        if (line.Contains("Skipped: lo_tile files already exist", StringComparison.OrdinalIgnoreCase) ||
-            line.Contains("Skipped: lo_tile raw grid already has", StringComparison.OrdinalIgnoreCase))
+        if (IsTileSkipStatus(line, "lo_tile files already exist") ||
+            IsTileSkipStatus(line, "lo_tile raw grid already has"))
         {
             dmStatus.Skipped++;
             UpdateStatusDisplay();
@@ -2699,7 +2702,7 @@ internal sealed partial class TopoForm : Form
             return;
         }
 
-        if (line.Contains("Skipped:", StringComparison.OrdinalIgnoreCase) && !readingDistantMountainOutput)
+        if (IsTileSkipStatus(line) && !readingDistantMountainOutput)
         {
             routeStatus.Skipped++;
             UpdateStatusDisplay();

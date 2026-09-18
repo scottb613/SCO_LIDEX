@@ -10,6 +10,7 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 
 ### v1.501 — HOTFIX
 
+- Corrects the live Skip counter so Scan exception summaries do not count as skipped terrain tiles.
 - Combines regional Geofabrik extracts for cross-border routes instead of requiring a single covering extract. Local routes cannot silently fall back to an oversized continent-scale download; logs list the source plan and download sizes.
 - Skips null/origin terrain and world files at X=0, Z=0 before coverage checks, logs each exclusion, and leaves the files untouched. Zero elevation is not an exclusion rule.
 - Reports unreadable terrain and recoverable tile failures, preserves affected files, and continues with usable tiles and independent stages. Cancellation, storage failures, and incompatible valid terrain resolutions retain their safeguards.

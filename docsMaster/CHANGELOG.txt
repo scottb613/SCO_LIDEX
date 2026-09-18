@@ -3,6 +3,8 @@ SCO LIDEX Changelog
 
 v1.501 - HOTFIX
 ---------------
+- Corrects the live Skip counter: Scan exception summaries no longer count
+  as skipped terrain tiles. Actual tile skip events still update the counter.
 - Unreadable terrain-resolution tiles are reported and skipped instead of
   blocking Scan/Run. Local terrain/DM failures no longer suppress later stages.
   Malformed map-tile geometry is reported per tile while other maps continue.

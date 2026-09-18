@@ -17,6 +17,8 @@ Release highlights
 
 v1.501 - HOTFIX
 ---------------
+- Corrects the live Skip counter: Scan exception summaries no longer count
+  as skipped terrain tiles. Actual tile skip events still update the counter.
 
 - Combines regional Geofabrik extracts across borders and prevents oversized
   continental fallbacks for local routes. Logs sources and download sizes.
