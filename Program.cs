@@ -90,7 +90,8 @@ internal static partial class Program
         int TerrainRadius,
         int LoTileRadius,
         bool Hd4mOutput,
-        bool ForceResolutionMismatches);
+        bool ForceResolutionMismatches,
+        bool AppendMode = true);
 
     internal sealed record DemSourcePolicy(
         bool UsePrimary,
@@ -218,6 +219,18 @@ internal static partial class Program
         if (args.Contains("--route-osm-lifecycle-probe", StringComparer.OrdinalIgnoreCase))
         {
             RunRouteOsmLifecycleProbe();
+            return;
+        }
+
+        if (args.Contains("--tile-errors-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunTileErrorProbe();
+            return;
+        }
+
+        if (args.Contains("--support-bundle-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunSupportBundleProbe();
             return;
         }
 
@@ -532,6 +545,9 @@ internal static partial class Program
             routeDir = Console.ReadLine()?.Trim('"', ' ') ?? "";
         }
 
+        using TileErrorSession? tileErrors = Directory.Exists(routeDir)
+            ? new(routeDir, !overwriteFlag && !args.Contains("--post-process-shift", StringComparer.OrdinalIgnoreCase), readOnly: inspectOnly) : null;
+
         if (args.Contains("--post-process-shift", StringComparer.OrdinalIgnoreCase))
         {
             PostProcessSelectionOptions options = new(
@@ -554,6 +570,13 @@ internal static partial class Program
         {
             Console.WriteLine("Error: choose only one selection source.");
             return;
+        }
+
+        if (!inspectOnly && !overwriteFlag && createRouteTiles)
+        {
+            HashSet<TileCoordinate> appendTiles = ReadAppendTileCoordinates(routeDir);
+            if (appendTiles.Count > 0)
+                EnsureNormalCoverageTiles(routeDir, appendTiles, "Append user/error file coverage", experimental4mTest);
         }
 
         if (markerCoverage && createRouteTiles)
@@ -874,7 +897,7 @@ internal static partial class Program
                 RawGrid? rawGrid = tile.RawHeightPath is null ? null : RawGrid.TryRead(tile.RawHeightPath, out RawGrid? grid, out _) ? grid : null;
                 RawGridStats? stats = rawGrid?.GetStats();
 
-                if (!overwriteFlag && stats is not null && !stats.IsEmpty)
+                if (!overwriteFlag && !RetryTileIssue(tile.TileFile.Name, "Terrain") && stats is not null && !stats.IsEmpty)
                 {
                     skipped++;
                     WriteLogDetail("Skipped", $"raw grid already has {stats.ValidCount:N0} valid height samples");
@@ -909,6 +932,7 @@ internal static partial class Program
 
                 if (mapper is null || tile.WorldTile is null)
                 {
+                    RecordTileIssue(tile.TileFile.Name, "Terrain", "tile-to-world or marker-based geographic coverage is unavailable");
                     failed++;
                     unmappableFailedNormalTileNames.Add(GetTerrainTileBaseName(tile));
                     MarkTerrainTileForAppendRetry(tile);
@@ -919,7 +943,8 @@ internal static partial class Program
 
                 rollingWriter?.FlushRowsBefore(tile.WorldTile.Z - 1);
 
-                GeoSampleGrid sampleGrid = mapper.GetSampleGrid(tile.WorldTile, sourceOffsetX, sourceOffsetZ, sourceScaleX, sourceScaleZ, sourceBiasEastMeters, sourceBiasNorthMeters);
+                GeoSampleGrid sampleGrid = ReadTileWithErrorTracking(tile.TileFile.Name, "Terrain", () =>
+                    mapper.GetSampleGrid(tile.WorldTile, sourceOffsetX, sourceOffsetZ, sourceScaleX, sourceScaleZ, sourceBiasEastMeters, sourceBiasNorthMeters));
                 (double minLon, double minLat, double maxLon, double maxLat) = sampleGrid.BoundingBox;
                 WriteLogDetail("DEM bounds", $"lon {minLon:F6}..{maxLon:F6} | lat {minLat:F6}..{maxLat:F6}");
 
@@ -996,8 +1021,14 @@ internal static partial class Program
                     WriteFailureDiagnostics($"Terrain generation failed: {tile.TileFile.FullName}", ex);
                     failed++;
                     retryableFailedNormalTileNames.Add(GetTerrainTileBaseName(tile));
+                    RecordTileIssue(tile.TileFile.Name, "Terrain", ex.ToString());
                     MarkTerrainTileForAppendRetry(tile);
                     WriteLogDetail("DEM generation failed", ex.Message);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    RecordTileIssue(tile.TileFile.Name, "Terrain", ex.ToString());
+                    throw;
                 }
 
                 PrintProgressCheckpoint(tileNumber, totalTiles, generatedCount, skipped, failed);
@@ -1122,6 +1153,7 @@ internal static partial class Program
     // representative USGS product availability before Run is allowed to write.
     internal static async Task<ScanSummary> ScanRouteAsync(string routeDir, ScanOptions options, CancellationToken cancellationToken)
     {
+        using TileErrorSession? tileErrors = Directory.Exists(routeDir) ? new(routeDir, options.AppendMode, readOnly: true) : null;
         WriteLogBanner("SCO LIDEX ROUTE SCAN");
         WriteLogDetail("Safety", "READ-ONLY; terrain-resolution reset requires explicit GUI confirmation");
 
@@ -1666,6 +1698,7 @@ internal static partial class Program
             else
             {
                 Console.WriteLine($"  -> Source read skipped {tile.TileFile.Name}: {error}");
+                RecordTileIssue(tile.TileFile.Name, "Terrain", error);
             }
         }
 
@@ -1695,6 +1728,7 @@ internal static partial class Program
             {
                 failed++;
                 Console.WriteLine($"  -> Failed: {targetError}");
+                RecordTileIssue(tile.TileFile.Name, "Terrain", targetError);
                 continue;
             }
 
@@ -1728,6 +1762,7 @@ internal static partial class Program
             {
                 failed++;
                 Console.WriteLine($"  -> Failed writing {tile.TileFile.Name}: could not read terrain sample encoding.");
+                RecordTileIssue(tile.TileFile.Name, "Terrain", "could not read terrain sample encoding");
                 WriteFailureDiagnostics("Stage failure; could not read terrain sample encoding");
                 continue;
             }
@@ -1743,12 +1778,14 @@ internal static partial class Program
                 {
                     WriteRawGrid(tile.RawHeightPath!, shifted, encoding);
                 }
+                ResolveTileIssue(tile.TileFile.Name, "Terrain");
                 written++;
             }
             catch (Exception ex)
             {
                 failed++;
                 Console.WriteLine($"  -> Failed writing {tile.TileFile.Name}: {ex.Message}");
+                RecordTileIssue(tile.TileFile.Name, "Terrain", ex.ToString());
                 WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
             }
         }
@@ -1817,6 +1854,7 @@ internal static partial class Program
             else
             {
                 Console.WriteLine($"  -> DM source read skipped {LoTileNameFromTileXZ(tile.X, tile.Z)}.t: {error}");
+                RecordTileIssue(NormalTileErrorName(tile.X, tile.Z), "DM", error);
             }
         }
 
@@ -1846,6 +1884,7 @@ internal static partial class Program
             if (!TryReadDecodedLoRawTile(loTilesDir, tile, out DecodedLoRawTile? target, out string targetError) || target is null)
             {
                 failed++;
+                RecordTileIssue(NormalTileErrorName(tile.X, tile.Z), "DM", targetError);
                 Console.WriteLine($"  -> Failed: {targetError}");
                 continue;
             }
@@ -1875,6 +1914,7 @@ internal static partial class Program
             {
                 failed++;
                 Console.WriteLine($"  -> Failed writing {loName}.t: could not read terrain sample encoding.");
+                RecordTileIssue(NormalTileErrorName(tile.X, tile.Z), "DM", "could not read terrain sample encoding");
                 WriteFailureDiagnostics("Stage failure; could not read terrain sample encoding");
                 continue;
             }
@@ -1883,12 +1923,14 @@ internal static partial class Program
             {
                 EnsureExactFileNameCasing(heightPath);
                 WriteEncodedHeightGrid(heightPath, shifted, encoding);
+                ResolveTileIssue(NormalTileErrorName(tile.X, tile.Z), "DM");
                 written++;
             }
             catch (Exception ex)
             {
                 failed++;
                 Console.WriteLine($"  -> Failed writing {loName}.t: {ex.Message}");
+                RecordTileIssue(NormalTileErrorName(tile.X, tile.Z), "DM", ex.ToString());
                 WriteFailureDiagnostics("Stage failure; see preceding error for affected input", ex);
             }
         }
@@ -2278,7 +2320,7 @@ internal static partial class Program
         }
 
         WriteLogSection("Retryable Failed Tiles");
-        WriteLogDetail("Action", "Paste these names into ROUTE\\SCOLIDEXTiles.txt, then run Use Text File + Append");
+        WriteLogDetail("Action", $"Saved automatically in ROUTE\\{TileErrorFileName}; Append includes these tiles alongside SCOLIDEXTiles.txt");
         foreach (string tileName in failedTileNames)
         {
             WriteLogBullet(tileName);

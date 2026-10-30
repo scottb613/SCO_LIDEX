@@ -1,6 +1,37 @@
 SCO LIDEX Changelog
 ===================
 
+v1.502 - Run recovery and diagnostics
+------------------------------------
+- Error runs create a Desktop SCOLIDEX-diagnostics.zip alongside the retained
+  plain-text SCOLIDEX.log. The archive is capped at 100 MB and contains bounded
+  log/list copies plus up to eight exact PolyVeg geometry reproduction samples.
+  Samples include CRS, GDAL/GEOS versions, source metadata, overlay settings,
+  local inputs/intermediates and detected conflict geometry. Size/count limits
+  and omissions are reported; diagnostic failures do not abort route work.
+- Automatically maintains ROUTE\SCOLIDEXErrors.txt for tile-associated Run
+  failures, including terrain, 4m terrain, DM, maps and skipped PolyVeg geometry.
+  Each tile retains outstanding stages, latest details and UTC timestamps.
+  Writes are synchronized and atomically replace the prior error list.
+- Append merges the user SCOLIDEXTiles.txt selection and automatic errors,
+  deduplicates coordinates and retries failed terrain/DM even if old height
+  grids exist. Enabled stages resolve only their own errors after successful
+  writes; PolyVeg errors clear only after validated geodata promotion.
+  Unprocessed/disabled/cancelled work remains listed. Scan reads the retry
+  selection without writing it. The user tile file is never modified.
+- PolyVeg retries rebuild route-wide derivatives from the reusable source
+  cache; selected map tiles are rendered separately. DM-only errors use their
+  normal-tile anchor name and do not create normal terrain tiles.
+- PolyVeg section exclusion and visible-layer overlap conflicts now omit the
+  affected source's piece on that tile and continue with remaining sources and
+  tiles. Other usable sections of the source remain eligible for export.
+- Warnings identify the tile/world filename, source ID, category/style, draw
+  order, staging key, conflict and omitted areas, tolerance, projected bounds,
+  route, source and output paths. Results and manifest diagnostics retain the
+  omitted-piece count; affected planting areas may have gaps.
+- Output validation, cancellation and storage-error handling remain in force.
+  The derivative generator revision changes so existing derivatives rebuild.
+
 v1.501 - HOTFIX
 ---------------
 - Corrects the live Skip counter: Scan exception summaries no longer count

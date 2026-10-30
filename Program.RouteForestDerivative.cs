@@ -43,7 +43,7 @@ internal static partial class Program
                 {
                     type = "FeatureCollection",
                     schemaVersion = 2,
-                    generatorRevision = 7,
+                    generatorRevision = RoutePolyVegGeodataBuilder.GeneratorRevision,
                     source = new
                     {
                         pbfPath = pbf.FullName,
@@ -110,7 +110,7 @@ internal static partial class Program
     private sealed partial class RoutePolyVegGeodataBuilder : IDisposable
     {
         private const int SchemaVersion = 2;
-        private const int GeneratorRevision = 7;
+        internal const int GeneratorRevision = 8;
         private const double CoverageBufferMetres = 2048.0;
         private const double GeometryAreaToleranceSquareMetres = 0.01;
         private const double OverlayPrecisionMetres = 0.01;
@@ -185,6 +185,7 @@ internal static partial class Program
         private readonly Geometry bufferedCoverageGeographic;
         private readonly CoordinateTransformation toProjected;
         private readonly CoordinateTransformation toGeographic;
+        private readonly int projectedEpsg;
         private readonly OsmGeometryStage stage;
         private readonly CancellationToken cancellationToken;
         private bool promoted;
@@ -193,6 +194,9 @@ internal static partial class Program
         private int exclusionLineFeatureCount;
         private int invalidGeometryRepairedCount;
         private int invalidGeometrySkippedCount;
+        private int conflictingSectionPiecesSkippedCount;
+        private readonly HashSet<TileCoordinate> failedPolyVegTiles = [];
+        private List<(WorldTile Tile, Envelope Bounds)>? projectedTileBounds;
 
         private RoutePolyVegGeodataBuilder(
             RouteLayout route,
@@ -216,7 +220,7 @@ internal static partial class Program
 
             using SpatialReference geographic = CreateSpatialReference(4326);
             int utmZone = Math.Clamp((int)Math.Floor((((envelope.MinX + envelope.MaxX) * 0.5) + 180.0) / 6.0) + 1, 1, 60);
-            int projectedEpsg = ((envelope.MinY + envelope.MaxY) * 0.5) >= 0.0 ? 32600 + utmZone : 32700 + utmZone;
+            projectedEpsg = ((envelope.MinY + envelope.MaxY) * 0.5) >= 0.0 ? 32600 + utmZone : 32700 + utmZone;
             using SpatialReference projected = CreateSpatialReference(projectedEpsg);
             toProjected = new CoordinateTransformation(geographic, projected);
             toGeographic = new CoordinateTransformation(projected, geographic);
@@ -286,6 +290,18 @@ internal static partial class Program
 
         internal void Collect(Feature feature, Geometry geometry)
         {
+            try { CollectCore(feature, geometry); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                using Geometry projected = geometry.Clone();
+                if (projected.Transform(toProjected) == 0)
+                    RecordPolyVegGeometryIssue(projected, $"OSM feature FID={feature.GetFID()}; {ex}");
+                throw;
+            }
+        }
+
+        private void CollectCore(Feature feature, Geometry geometry)
+        {
             cancellationToken.ThrowIfCancellationRequested();
             string layerName = feature.GetDefnRef().GetName();
             if (string.Equals(layerName, "points", StringComparison.OrdinalIgnoreCase)) return;
@@ -307,6 +323,9 @@ internal static partial class Program
             else if (!valid)
             {
                 invalidGeometrySkippedCount++;
+                using Geometry projectedInvalid = geometry.Clone();
+                if (projectedInvalid.Transform(toProjected) == 0)
+                    RecordPolyVegGeometryIssue(projectedInvalid, $"Unrepairable OSM geometry skipped; layer={layerName}; FID={feature.GetFID()}");
                 return;
             }
             Geometry sourceGeometry = repairedGeometry ?? geometry;
@@ -491,6 +510,9 @@ internal static partial class Program
                     stage.Complete();
                 }
                 promoted = true;
+                foreach (WorldTile tile in coverageTiles)
+                    if (!failedPolyVegTiles.Contains(new TileCoordinate(tile.X, tile.Z)))
+                        ResolveTileIssue(NormalTileErrorName(tile.X, tile.Z), "PolyVeg");
             }
             finally
             {
@@ -510,6 +532,8 @@ internal static partial class Program
             WriteOsmLogSection("POLYVEG RESULTS");
             WriteOsmLogEntry(
                 $"Complete: {writtenFeatures:N0} features; {writtenParts:N0} polygon parts; {writtenHoles:N0} holes.");
+            if (conflictingSectionPiecesSkippedCount > 0)
+                WriteOsmLogEntry($"WARNING: Completed with {conflictingSectionPiecesSkippedCount:N0} conflicting PolyVeg section piece(s) omitted. See tile/source diagnostics above; affected planting areas may have gaps.");
             WriteOsmLogEntry($"Surfaces: {outputPath}");
             WriteOsmLogEntry($"Exclusions: {exclusionsPath}");
             WriteOsmLogEntry($"GeoPackage: {geopackagePath}");
@@ -634,9 +658,11 @@ internal static partial class Program
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 SetDiagnosticContext("Terrain section", $"{tileIndex + 1}/{coverageTiles.Count}; X={coverageTiles[tileIndex].X}, Z={coverageTiles[tileIndex].Z}");
-                using Geometry core = BuildProjectedTileCoverage(coverageTiles[tileIndex]);
-                using Geometry context = core.Buffer(TerrainVegetationSeparationMetres * 2.0, 4)
-                    ?? throw new InvalidDataException("Could not create terrain-section overlap context");
+                string sectionTileName = NormalTileErrorName(coverageTiles[tileIndex].X, coverageTiles[tileIndex].Z);
+                using Geometry core = ReadTileWithErrorTracking(sectionTileName, "PolyVeg", () => BuildProjectedTileCoverage(coverageTiles[tileIndex]));
+                using Geometry context = ReadTileWithErrorTracking(sectionTileName, "PolyVeg", () =>
+                    core.Buffer(TerrainVegetationSeparationMetres * 2.0, 4)
+                    ?? throw new InvalidDataException("Could not create terrain-section overlap context"));
                 List<(long Id, PolyVegSource Source)> localSources = [];
                 Geometry? separatedLocalExclusions = null;
                 Geometry? rawLocalExclusions = null;
@@ -666,6 +692,8 @@ internal static partial class Program
                     }
                     for (int sourceIndex = 0; sourceIndex < orderedSources.Length; sourceIndex++)
                     {
+                        PolyVegSource currentSource = orderedSources[sourceIndex].Source;
+                        SetDiagnosticContext("PolyVeg feature", $"{currentSource.SourceId}; category={currentSource.Category}");
                         Geometry? normalizedSource = orderedSources[sourceIndex].Source.ProjectedGeometry;
                         if (normalizedSource is null || normalizedSource.IsEmpty())
                         {
@@ -689,36 +717,9 @@ internal static partial class Program
                                 $"local visible-layer stacking for {orderedSources[sourceIndex].Source.SourceId}");
                         if (visible is null || visible.IsEmpty() ||
                             visible.GetArea() <= GeometryAreaToleranceSquareMetres) continue;
-                        if (claimedLocal is not null)
-                        {
-                            using Geometry? overlapConflict = visible.Intersection(claimedLocal);
-                            if (overlapConflict is not null &&
-                                overlapConflict.GetArea() > GeometryAreaToleranceSquareMetres)
-                            {
-                                throw new InvalidDataException(
-                                    $"terrain section {coverageTiles[tileIndex].X},{coverageTiles[tileIndex].Z} " +
-                                    $"retained a visible-layer overlap for {orderedSources[sourceIndex].Source.SourceId}");
-                            }
-                        }
-
-                        using Geometry? coreVisible = visible.Intersection(core);
-                        if (coreVisible is not null && !coreVisible.IsEmpty() &&
-                            coreVisible.GetArea() > GeometryAreaToleranceSquareMetres)
-                        {
-                            if (rawLocalExclusions is not null)
-                            {
-                                using Geometry? exclusionConflict = coreVisible.Intersection(
-                                    rawLocalExclusions);
-                                if (exclusionConflict is not null &&
-                                    exclusionConflict.GetArea() > GeometryAreaToleranceSquareMetres)
-                                {
-                                    throw new InvalidDataException(
-                                        $"terrain section {coverageTiles[tileIndex].X},{coverageTiles[tileIndex].Z} " +
-                                        $"retained an exclusion conflict for {orderedSources[sourceIndex].Source.SourceId}");
-                                }
-                            }
-                            stage.Add("pieces", coreVisible, key: orderedSources[sourceIndex].Id);
-                        }
+                        if (!TryStagePolyVegSection(tileIndex, orderedSources[sourceIndex].Id,
+                            currentSource, visible, core, rawLocalExclusions, claimedLocal,
+                            new(localSource, withoutExclusions, separatedLocalExclusions, context))) continue;
 
                         using Geometry? expandedVisible = visible.Buffer(
                             TerrainVegetationSeparationMetres,
@@ -743,6 +744,11 @@ internal static partial class Program
                     }
 
                 }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    RecordPolyVegTileIssue(coverageTiles[tileIndex], ex.ToString());
+                    throw;
+                }
                 finally
                 {
                     foreach (var item in localSources) item.Source.ProjectedGeometry.Dispose();
@@ -750,7 +756,7 @@ internal static partial class Program
                     rawLocalExclusions?.Dispose();
                     claimedLocal?.Dispose();
                 }
-                stage.Flush();
+                ReadTileWithErrorTracking(sectionTileName, "PolyVeg", () => { stage.Flush(); return 0; });
                 tileProgress.Report(tileIndex + 1, "Terrain sections processed");
             }
 
@@ -766,34 +772,43 @@ internal static partial class Program
                 cancellationToken.ThrowIfCancellationRequested();
                 PolyVegSource source = JsonSerializer.Deserialize<PolyVegSource>(row.Payload)!;
                 SetDiagnosticContext("PolyVeg feature", $"{source.SourceId}; category={source.Category}");
-                using Geometry accumulated = new(wkbGeometryType.wkbMultiPolygon);
-                foreach (var piece in stage.Read("pieces", sourceKey: row.Id))
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    AddPolygonParts(piece.Geometry, accumulated);
-                }
-                using Geometry? polygonal = accumulated.IsEmpty() ? null : AssembleVisiblePolygonParts(accumulated);
-                if (polygonal is not null && !polygonal.IsEmpty() && polygonal.GetArea() > GeometryAreaToleranceSquareMetres)
-                {
-                    double plantableArea = polygonal.GetArea();
-                    int transformResult = polygonal.Transform(toGeographic);
-                    string? geometryJson = transformResult == 0
-                        ? PreparePolyVegGeometryJson(polygonal, toProjected)
-                        : null;
-                    if (geometryJson is null)
+                    using Geometry accumulated = new(wkbGeometryType.wkbMultiPolygon);
+                    foreach (var piece in stage.Read("pieces", sourceKey: row.Id))
                     {
-                        skippedDegenerate++;
-                        WriteOsmLogEntry($"WARNING: Skipping PolyVeg {source.SourceId} ({source.Category}): empty, non-finite, or negligible area after geographic export; projected area={plantableArea:G17} m².");
-                        assemblyProgress.Report(++assembled, "PolyVeg features assembled");
-                        continue;
+                        cancellationToken.ThrowIfCancellationRequested();
+                        AddPolygonParts(piece.Geometry, accumulated);
                     }
-                    CountPolygonParts(polygonal, ref parts, ref holes);
-                    WritePolyVegFeature(writer, source, geometryJson, source.OriginalArea, plantableArea);
-                    categoryCounts[source.Category]++;
-                    written++;
-                    writer.Flush();
+                    using Geometry? polygonal = accumulated.IsEmpty() ? null : AssembleVisiblePolygonParts(accumulated);
+                    if (polygonal is not null && !polygonal.IsEmpty() && polygonal.GetArea() > GeometryAreaToleranceSquareMetres)
+                    {
+                        double plantableArea = polygonal.GetArea();
+                        int transformResult = polygonal.Transform(toGeographic);
+                        string? geometryJson = transformResult == 0
+                            ? PreparePolyVegGeometryJson(polygonal, toProjected)
+                            : null;
+                        if (geometryJson is null)
+                        {
+                            skippedDegenerate++;
+                            RecordPolyVegGeometryIssue(accumulated, $"{source.SourceId} ({source.Category}): degenerate geometry after geographic export; projected area={plantableArea:G17} m²");
+                            WriteOsmLogEntry($"WARNING: Skipping PolyVeg {source.SourceId} ({source.Category}): empty, non-finite, or negligible area after geographic export; projected area={plantableArea:G17} m².");
+                            assemblyProgress.Report(++assembled, "PolyVeg features assembled");
+                            continue;
+                        }
+                        CountPolygonParts(polygonal, ref parts, ref holes);
+                        WritePolyVegFeature(writer, source, geometryJson, source.OriginalArea, plantableArea);
+                        categoryCounts[source.Category]++;
+                        written++;
+                        writer.Flush();
+                    }
+                    assemblyProgress.Report(++assembled, "PolyVeg features assembled");
                 }
-                assemblyProgress.Report(++assembled, "PolyVeg features assembled");
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    RecordPolyVegGeometryIssue(row.Geometry, $"Feature assembly/export failed: {source.SourceId}; {ex}");
+                    throw;
+                }
             }
             writer.WriteEndArray();
             writer.WriteEndObject();
@@ -802,6 +817,133 @@ internal static partial class Program
             if (skippedDegenerate > 0)
                 WriteOsmLogEntry($"WARNING: Skipped {skippedDegenerate:N0} degenerate PolyVeg feature(s); retained {written:N0} valid feature(s).");
             return (written, parts, holes);
+        }
+
+        // Reject only this source's section piece. Other sections of the same
+        // source remain usable, and rejected geometry never enters the output
+        // or the clearance claimed against subsequent sources.
+        private sealed record PolyVegOverlayInputs(Geometry LocalSource, Geometry WithoutExclusions,
+            Geometry? SeparatedExclusions, Geometry Context);
+
+        private bool TryStagePolyVegSection(int tileIndex, long sourceKey, PolyVegSource source,
+            Geometry visible, Geometry core, Geometry? rawExclusions, Geometry? claimed,
+            PolyVegOverlayInputs? inputs = null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using Geometry? overlap = claimed is null ? null : visible.Intersection(claimed);
+            if (SkipConflictingSection(overlap, visible, "visible-layer overlap", tileIndex, sourceKey, source,
+                visible, core, rawExclusions, claimed, inputs))
+                return false;
+            using Geometry? coreVisible = visible.Intersection(core);
+            if (coreVisible is null || coreVisible.IsEmpty() ||
+                coreVisible.GetArea() <= GeometryAreaToleranceSquareMetres) return true;
+            using Geometry? exclusion = rawExclusions is null ? null : coreVisible.Intersection(rawExclusions);
+            if (SkipConflictingSection(exclusion, coreVisible, "permanent exclusion conflict", tileIndex, sourceKey, source,
+                visible, core, rawExclusions, claimed, inputs))
+                return false;
+            stage.Add("pieces", coreVisible, key: sourceKey);
+            return true;
+        }
+
+        private bool SkipConflictingSection(Geometry? conflict, Geometry candidate, string reason,
+            int tileIndex, long sourceKey, PolyVegSource source, Geometry visible, Geometry core,
+            Geometry? rawExclusions, Geometry? claimed, PolyVegOverlayInputs? inputs)
+        {
+            if (conflict is null || conflict.IsEmpty()) return false;
+            double area = conflict.GetArea();
+            if (double.IsFinite(area) && area <= GeometryAreaToleranceSquareMetres) return false;
+            conflictingSectionPiecesSkippedCount++;
+            Envelope bounds = new();
+            conflict.GetEnvelope(bounds);
+            WorldTile tile = coverageTiles[tileIndex];
+            string? sample = null;
+            try
+            {
+                sample = TileErrorsFor(routeDirectory)?.Support?.Capture(() => new
+                {
+                    version = ReadVersionText(),
+                    utc = DateTimeOffset.UtcNow,
+                    generatorRevision = GeneratorRevision,
+                    buildId = typeof(Program).Assembly.ManifestModule.ModuleVersionId,
+                    runtime = Environment.Version.ToString(),
+                    os = Environment.OSVersion.ToString(),
+                    gdal = OSGeo.GDAL.Gdal.VersionInfo("RELEASE_NAME"),
+                    geos = $"{Ogr.GetGEOSVersionMajor()}.{Ogr.GetGEOSVersionMinor()}.{Ogr.GetGEOSVersionMicro()}",
+                    crs = $"EPSG:{projectedEpsg}",
+                    coordinateUnits = "metres",
+                    reason,
+                    tile = new { tile.X, tile.Z, section = tileIndex + 1, totalSections = coverageTiles.Count },
+                    source = new { source.SourceId, source.Category, source.StyleId, source.DrawOrder, source.Properties, source.OriginalArea, stagedKey = sourceKey },
+                    conflictAreaSquareMetres = area,
+                    omittedAreaSquareMetres = candidate.GetArea(),
+                    sourceValid = source.ProjectedGeometry.IsValid(),
+                    conflictValid = conflict.IsValid(),
+                    candidateValid = candidate.IsValid(),
+                    rawExclusionsValid = rawExclusions?.IsValid(),
+                    toleranceSquareMetres = GeometryAreaToleranceSquareMetres,
+                    precisionMetres = TerrainOverlayPrecisionMetres,
+                    clearanceMetres = TerrainVegetationSeparationMetres,
+                    bufferQuadrantSegments = 4,
+                    coverageFingerprint,
+                    routeDirectory,
+                    workingSourcePath = pbfPath,
+                    workingSourceBytes = new FileInfo(pbfPath).Length,
+                    workingSourceModifiedUtc = File.GetLastWriteTimeUtc(pbfPath),
+                    replay = "local-source.Difference(separated-exclusions) -> without-exclusions; Difference(claimed) -> visible; Intersection(core) -> candidate; candidate.Intersection(raw-exclusions) or visible.Intersection(claimed) -> conflict",
+                }, new Dictionary<string, Geometry?>
+                {
+                    ["normalized-source"] = source.ProjectedGeometry,
+                    ["local-source"] = inputs?.LocalSource,
+                    ["without-exclusions"] = inputs?.WithoutExclusions,
+                    ["separated-exclusions"] = inputs?.SeparatedExclusions,
+                    ["context"] = inputs?.Context,
+                    ["visible"] = visible,
+                    ["candidate"] = candidate,
+                    ["core"] = core,
+                    ["raw-exclusions"] = rawExclusions,
+                    ["claimed"] = claimed,
+                    ["conflict"] = conflict,
+                });
+            }
+            catch (Exception captureError) when (captureError is not OperationCanceledException and not OutOfMemoryException)
+            {
+                WriteOsmLogEntry($"WARNING: Could not collect reproduction sample: {captureError.Message}. Original conflict is still logged; processing continues.");
+            }
+            RecordPolyVegTileIssue(tile, FormattableString.Invariant($"{reason}; source={source.SourceId}; category={source.Category}; style={source.StyleId}; conflict area={area:G17} m²; omitted area={candidate.GetArea():G17} m²; CRS=EPSG:{projectedEpsg}; bounds X={bounds.MinX:G17}..{bounds.MaxX:G17}, Y={bounds.MinY:G17}..{bounds.MaxY:G17}; reproduction sample={sample ?? "not captured; see log for limits/failures"}"));
+            WriteOsmLogEntry($"WARNING: Skipping PolyVeg section piece: {reason}. Continuing with remaining sources and tiles.");
+            WriteOsmLogEntry($"Terrain section {tileIndex + 1}/{coverageTiles.Count}; X={tile.X}, Z={tile.Z}; world file={WorldFileName(tile.X, tile.Z)}", indent: 4);
+            WriteOsmLogEntry($"Source={source.SourceId}; category={source.Category}; style={source.StyleId}; drawOrder={source.DrawOrder}; staged source key={sourceKey}", indent: 4);
+            WriteOsmLogEntry(FormattableString.Invariant($"Conflict area={area:G17} m²; tolerance={GeometryAreaToleranceSquareMetres:G17} m²; omitted piece area={candidate.GetArea():G17} m²; original source area={source.OriginalArea:G17} m²"), indent: 4);
+            WriteOsmLogEntry(FormattableString.Invariant($"Conflict bounds (route UTM metres): X={bounds.MinX:G17}..{bounds.MaxX:G17}; Y={bounds.MinY:G17}..{bounds.MaxY:G17}; geometry={conflict.GetGeometryType()}; parts={conflict.GetGeometryCount()}"), indent: 4);
+            WriteOsmLogEntry($"Route={routeDirectory}; OSM working source={pbfPath}; output={outputPath}", indent: 4);
+            return true;
+        }
+
+        private void RecordPolyVegTileIssue(WorldTile tile, string reason)
+        {
+            if (failedPolyVegTiles.Add(new TileCoordinate(tile.X, tile.Z)) && TileErrorsFor(routeDirectory) is not null)
+                RecordTileException();
+            RecordTileIssue(NormalTileErrorName(tile.X, tile.Z), "PolyVeg", reason);
+        }
+
+        private void RecordPolyVegGeometryIssue(Geometry projected, string reason)
+        {
+            if (projected.IsEmpty()) return;
+            Envelope bounds = new();
+            projected.GetEnvelope(bounds);
+            projectedTileBounds ??= coverageTiles.Select(tile =>
+            {
+                using Geometry footprint = BuildProjectedTileCoverage(tile);
+                Envelope tileBounds = new();
+                footprint.GetEnvelope(tileBounds);
+                return (tile, tileBounds);
+            }).ToList();
+            foreach ((WorldTile tile, Envelope tileBounds) in projectedTileBounds)
+            {
+                if (bounds.MaxX >= tileBounds.MinX && bounds.MinX <= tileBounds.MaxX &&
+                    bounds.MaxY >= tileBounds.MinY && bounds.MinY <= tileBounds.MaxY)
+                    RecordPolyVegTileIssue(tile, reason);
+            }
         }
 
         // Check the exact serialized coordinates before writing or counting a feature.
@@ -1208,6 +1350,7 @@ internal static partial class Program
                 {
                     invalidGeometryRepaired = invalidGeometryRepairedCount,
                     invalidGeometrySkipped = invalidGeometrySkippedCount,
+                    conflictingSectionPiecesSkipped = conflictingSectionPiecesSkippedCount,
                     incompleteRelationsSkipped = 0,
                 },
             };
@@ -2078,6 +2221,7 @@ internal static partial class Program
                 if (snapped is null || snapped.IsEmpty())
                 {
                     invalidGeometrySkippedCount++;
+                    RecordPolyVegGeometryIssue(geometry, "Exclusion geometry collapsed during precision normalization");
                     return;
                 }
                 if (snapped.IsValid())
@@ -2091,6 +2235,7 @@ internal static partial class Program
                 if (repaired is null || repaired.IsEmpty() || !repaired.IsValid())
                 {
                     invalidGeometrySkippedCount++;
+                    RecordPolyVegGeometryIssue(geometry, "Exclusion geometry could not be repaired");
                     return;
                 }
                 invalidGeometryRepairedCount++;

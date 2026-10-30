@@ -1593,7 +1593,8 @@ internal sealed partial class TopoForm : Form
                 TerrainRadius: (int)terrainRadius.Value,
                 LoTileRadius: (int)loTileRadius.Value,
                 Hd4mOutput: experimentalOutput.Checked,
-                ForceResolutionMismatches: terrainResolutionForceApproved);
+                ForceResolutionMismatches: terrainResolutionForceApproved,
+                AppendMode: appendMode.Checked);
 
             Program.ScanSummary summary = await Task.Run(() => Program.ScanRouteAsync(routePath, options, scanCancellation.Token));
             routeStatus.Total = summary.RouteTileTotal;
@@ -1706,6 +1707,7 @@ internal sealed partial class TopoForm : Form
         previousError = Console.Error;
         logFileWriter = OpenLogFile();
         Program.BeginDiagnostics("Run", routePath);
+        Program.BeginSupportCapture(routePath);
         WriteRunSettingsHeader(routePath, "Run");
         AppendLog(runResolutionLog);
         using TextWriter writer = new UiTextWriter(AppendLog);
@@ -1745,6 +1747,20 @@ internal sealed partial class TopoForm : Form
                 Program.FormatProcessMemoryDiagnostics() +
                 $"  USGS DATA READ: {Program.FormatUsgsDataBytesRead()}{Environment.NewLine}" +
                 $"  COPERNICUS DATA READ: {Program.FormatCopernicusDataBytesRead()}{Environment.NewLine}");
+            if (Program.NeedsSupportZip(routePath, Program.HadTileExceptions ||
+                operationFailed && !operationMessage.Contains("ABORT", StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    logFileWriter?.Flush();
+                    string supportZip = Program.CreateSupportZip(routePath, Path.Combine(GetUserFacingLogDirectory(), "SCOLIDEX.log"));
+                    AppendLog($"  SUPPORT ZIP: {supportZip} (100 MB maximum){Environment.NewLine}");
+                }
+                catch (Exception bundleError)
+                {
+                    AppendLog($"  WARNING: Could not create support ZIP: {bundleError.Message}. The plain log is retained.{Environment.NewLine}");
+                }
+            }
             Console.SetOut(previousOut);
             Console.SetError(previousError);
             lock (logWriteLock)

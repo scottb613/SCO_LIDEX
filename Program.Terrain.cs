@@ -41,6 +41,8 @@ internal static partial class Program
         foreach (string skipped in route.SkippedInvalidFiles)
         {
             RecordTileException();
+            int tileEnd = skipped.IndexOf(".t:", StringComparison.OrdinalIgnoreCase);
+            if (tileEnd >= 0) RecordTileIssue(skipped[..(tileEnd + 2)], "Terrain", skipped);
             WriteLogDetail("Tile exception - skipped", skipped);
         }
         foreach (string skipped in route.SkippedOriginFiles)
@@ -1157,6 +1159,7 @@ internal static partial class Program
         {
             Console.WriteLine(
                 $"  -> Could not normalize legacy map terrain material: {ex.Message}");
+            RecordTileIssue(tile.TileFile.Name, "Terrain", $"Legacy terrain material normalization failed: {ex}");
             return false;
         }
     }
@@ -1398,7 +1401,8 @@ internal static partial class Program
             foreach ((int X, int Z) key in keysToFlush)
             {
                 GeneratedTile generated = pending[key];
-                WriteGeneratedTile(outputDir, generated, patchHeights[generated.Tile.TileFile.Name], cleanTileTemplate);
+                WriteTileWithErrorTracking(generated.Tile.TileFile.Name, "Terrain", () =>
+                    WriteGeneratedTile(outputDir, generated, patchHeights[generated.Tile.TileFile.Name], cleanTileTemplate));
                 pending.Remove(key);
             }
         }

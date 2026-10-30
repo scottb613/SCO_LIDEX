@@ -3,7 +3,7 @@ SCO LIDEX / TSRE GenX PolyVeg Geodata Contract v2
 
 Status
 ------
-Development contract for SCO LIDEX v1.501 and TSRE GenX v0.12.
+Development contract for SCO LIDEX v1.502 and TSRE GenX v0.12.
 PolyVeg is the only planting-geodata handoff. There is no legacy forest
 GeoJSON fallback.
 
@@ -118,6 +118,13 @@ prevents unstable shared-edge topology while preserving the visible map shape.
 
 No coordinate may belong to two final plantable PolyVeg features. TSRE selects
 the exported boundary and does not reconstruct stacking or OSM exclusions.
+
+Section-level exclusion or visible-layer overlap conflicts omit the affected
+source's piece on that tile before export and continue processing. Warnings
+identify the source/tile and geometry diagnostics; the results and manifest
+diagnostics.conflictingSectionPiecesSkipped record the omitted-piece count.
+Other usable sections of the source remain eligible. Omitted pieces may leave
+planting gaps; the final-output validation requirements still apply.
 
 Permanent exclusions
 --------------------

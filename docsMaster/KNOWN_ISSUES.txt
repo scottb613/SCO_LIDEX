@@ -1,6 +1,13 @@
 SCO LIDEX Known Issues
 ======================
 
+- v1.502 omits conflicting PolyVeg section pieces and records their tiles for
+  retry. This can leave planting gaps and does not repair the underlying OSM
+  conflict. PolyVeg retries rebuild the complete route handoff from cached OSM;
+  other geometry exceptions can still stop the run after diagnostic recording.
+  Support geometry samples are bounded and cannot capture every issue on a
+  heavily affected route; omissions are reported in the log and support ZIP.
+
 - HD Test - 4m Tiles is an Open Rails evaluation output. Back up the route
   before converting it. When Create Route Tiles is selected, read-only Scan
   requires approval before Run rebuilds mismatched tiles into that resolution.

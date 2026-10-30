@@ -89,6 +89,11 @@ internal static partial class Program
         HashSet<TileCoordinate> textTiles = ReadTextFileTileCoordinates(routeDir);
         if (textTiles.Count == 0)
         {
+            if (TileErrorsFor(routeDir) is { Append: true })
+            {
+                Console.WriteLine("Text file coverage: no normal tile entries; pending DM errors are processed separately.");
+                return;
+            }
             throw new InvalidOperationException("SCOLIDEXTiles.txt did not contain any readable terrain tile names.");
         }
 
@@ -114,39 +119,47 @@ internal static partial class Program
         int createdWorldFiles = 0;
         foreach (TileCoordinate tile in coverage.OrderBy(t => t.X).ThenBy(t => t.Z))
         {
-            string tileBaseName = RouteLayout.TileNameFromTileXZ(tile.X, tile.Z);
-            string tilePath = Path.Combine(tilesDir, tileBaseName + ".t");
-            string rawPath = Path.Combine(tilesDir, tileBaseName + "_y.raw");
-            string worldPath = Path.Combine(worldDir, WorldFileName(tile.X, tile.Z));
-
-            EnsureExactFileNameCasing(tilePath);
-            EnsureExactFileNameCasing(rawPath);
-            if (!File.Exists(tilePath))
+            try
             {
-                byte[] tileBytes = CreateTerrainTileFromTemplate(templateTile, tileBaseName);
-                PatchTerrainResolutionMetadata(
-                    tileBytes,
-                    hd4mOutput ? ExperimentalRawGridSize : OrtsRawGridSize,
-                    hd4mOutput
-                        ? (float)ExperimentalPostSpacingMeters
-                        : (float)OrtsPostSpacingMeters);
-                File.WriteAllBytes(tilePath, tileBytes);
-                createdTerrainTiles++;
+                string tileBaseName = RouteLayout.TileNameFromTileXZ(tile.X, tile.Z);
+                string tilePath = Path.Combine(tilesDir, tileBaseName + ".t");
+                string rawPath = Path.Combine(tilesDir, tileBaseName + "_y.raw");
+                string worldPath = Path.Combine(worldDir, WorldFileName(tile.X, tile.Z));
+
+                EnsureExactFileNameCasing(tilePath);
+                EnsureExactFileNameCasing(rawPath);
+                if (!File.Exists(tilePath))
+                {
+                    byte[] tileBytes = CreateTerrainTileFromTemplate(templateTile, tileBaseName);
+                    PatchTerrainResolutionMetadata(
+                        tileBytes,
+                        hd4mOutput ? ExperimentalRawGridSize : OrtsRawGridSize,
+                        hd4mOutput
+                            ? (float)ExperimentalPostSpacingMeters
+                            : (float)OrtsPostSpacingMeters);
+                    File.WriteAllBytes(tilePath, tileBytes);
+                    createdTerrainTiles++;
+                }
+
+                if (!File.Exists(rawPath))
+                {
+                    File.WriteAllBytes(
+                        rawPath,
+                        CreateEmptyRawGridBytes(
+                            hd4mOutput ? ExperimentalRawGridSize : OrtsRawGridSize));
+                    createdRawGrids++;
+                }
+
+                if (!File.Exists(worldPath))
+                {
+                    File.WriteAllText(worldPath, "SIMISA@@@@@@@@@@JINX0w0t______\r\n\r\nTr_Worldfile (\r\n)\r\n", Encoding.ASCII);
+                    createdWorldFiles++;
+                }
             }
-
-            if (!File.Exists(rawPath))
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                File.WriteAllBytes(
-                    rawPath,
-                    CreateEmptyRawGridBytes(
-                        hd4mOutput ? ExperimentalRawGridSize : OrtsRawGridSize));
-                createdRawGrids++;
-            }
-
-            if (!File.Exists(worldPath))
-            {
-                File.WriteAllText(worldPath, "SIMISA@@@@@@@@@@JINX0w0t______\r\n\r\nTr_Worldfile (\r\n)\r\n", Encoding.ASCII);
-                createdWorldFiles++;
+                RecordTileIssue(NormalTileErrorName(tile.X, tile.Z), "Terrain", ex.ToString());
+                throw;
             }
         }
 
@@ -236,6 +249,7 @@ internal static partial class Program
 
         if (coverage is not null)
         {
+            coverage.UnionWith(ReadAppendTileCoordinates(route.RouteDir));
             tiles = tiles.Where(tile =>
                 tile.WorldTile is not null &&
                 coverage.Contains(new TileCoordinate(tile.WorldTile.X, tile.WorldTile.Z)));
@@ -340,6 +354,17 @@ internal static partial class Program
     }
 
     private static HashSet<TileCoordinate> ReadTextFileTileCoordinates(string routeDir)
+    {
+        HashSet<TileCoordinate> tiles = ReadAppendTileCoordinates(routeDir);
+        if (File.Exists(Path.Combine(routeDir, "SCOLIDEXTiles.txt")) ||
+            File.Exists(Path.Combine(routeDir, "SCOtopoTiles.txt")))
+            tiles.UnionWith(ReadUserTileCoordinates(routeDir));
+        else if (tiles.Count == 0 && TileErrorsFor(routeDir) is not { Append: true })
+            throw new FileNotFoundException($"could not find SCOLIDEXTiles.txt in {routeDir}");
+        return tiles;
+    }
+
+    private static HashSet<TileCoordinate> ReadUserTileCoordinates(string routeDir)
     {
         string tileListPath = Path.Combine(routeDir, "SCOLIDEXTiles.txt");
         if (!File.Exists(tileListPath))

@@ -43,6 +43,50 @@ Overwrite:
 
 5. Options
 ----------
+Automatic tile error/retry file (v1.502):
+  Run creates SCOLIDEXErrors.txt in the route folder. Tile-associated failures
+  update it immediately, including skipped PolyVeg conflicts and invalid
+  geometry. Each tile line keeps the outstanding stage(s), latest error details
+  and UTC time after a # comment. Full diagnostics remain in SCOLIDEX.log.
+  LIDEX never edits your SCOLIDEXTiles.txt file.
+
+  In Append, the user list and automatic error list are merged with the selected
+  coverage, with duplicate coordinates processed once. Use Text File + Append
+  for a focused list-based retry; it works with either or both files present.
+  Failed terrain/DM work is retried even when an old raw height grid exists.
+  Enable the output whose error you want to retry. A successful stage removes
+  only its own error; other outstanding stages stay listed. Disabled, unvisited
+  or cancelled work is retained. Scan reads these selections without writing.
+
+  PolyVeg retries rebuild the route-wide planting derivatives from the cached
+  OSM source so the complete four-file handoff remains consistent. It is not a
+  one-tile patch of the planting files. Its errors clear only after validation
+  and successful promotion; omitted geometry remains listed for another retry.
+  DM-only errors are stored using the normal-tile name at the lo_tile anchor,
+  with DM recorded in the comment; they do not create normal terrain tiles.
+  Undecodable filenames remain listed for manual investigation. Failures with
+  no identifiable tile remain in the main log rather than guessing a tile.
+
+Transferable diagnostics (v1.502):
+  The GUI always retains the plain-text Desktop SCOLIDEX.log. After a Run
+  encounters errors, it also creates Desktop SCOLIDEX-diagnostics.zip, ready
+  to send. A clean run does not create or replace this ZIP; an older ZIP may
+  remain from a previous error run, with its UTC timestamp in README.txt.
+  Cancellation alone does not create a ZIP unless errors were encountered.
+
+  The ZIP has a hard 100,000,000-byte (100 MB) limit. It contains the log,
+  available tile lists and up to eight PolyVeg conflict reproduction samples.
+  Samples preserve exact WKB geometry, including local source, masks, clearance,
+  stacking, candidate and conflict geometry, with CRS, library versions, source
+  identity, tags and processing settings. Original source extracts, complete
+  route GeoPackages, terrain grids, map images and scenery are not included.
+  Geometry is limited to 16 MB per sample and 64 MB total. Only the support
+  copies of oversized logs/lists are trimmed, retaining the beginning and end.
+  README.txt and the log report omissions; the original log is never trimmed.
+  Diagnostic samples remain under route osm_data\diagnostics after temporary
+  geometry staging is removed. Capture/packaging failures are warnings and do
+  not replace the original error or abort the route run.
+
 Create Route Tiles, Create DM Tiles, and Create OSM/Map Tiles are selected by
 default. Every Options control has a short tooltip describing its behavior.
 

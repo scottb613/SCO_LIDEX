@@ -37,6 +37,7 @@ internal static partial class Program
             else
             {
                 RecordTileException();
+                RecordTileIssue(tile.TileFile.Name, "Terrain", reason);
                 WriteLogDetail("Tile exception - skipped", $"{tile.TileFile.FullName}: {reason}; existing files preserved");
             }
         }

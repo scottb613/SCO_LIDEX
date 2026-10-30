@@ -10,10 +10,25 @@ and writes terrain back into an existing route.
 The exact planting handoff is documented in
 docsMaster\POLYVEG-GEODATA-CONTRACT-v2.txt.
 
-Current version: v1.501.
+Current version: v1.502.
 
 Release highlights
 ==================
+
+v1.502 - Run recovery and diagnostics
+------------------------------------
+- Conflicting PolyVeg section pieces are logged and omitted while the remaining
+  sources and tiles continue. Omitted pieces can leave planting gaps.
+- SCOLIDEXErrors.txt retains tile IDs, outstanding stages, details and timestamps.
+  Append merges it with the user list and clears only successfully resolved
+  stages. Scan reads the retry selection without writing the file.
+- Desktop SCOLIDEX.log remains plain text. Error runs also create the ready-to-
+  transfer SCOLIDEX-diagnostics.zip, capped at 100 MB, with bounded log/list copies
+  and up to eight exact conflict geometry samples and processing metadata.
+  Size/count omissions are reported. Large route caches are not included.
+- PolyVeg retries rebuild the full route handoff from cached OSM data. Other
+  geometry and operation-wide failures retain their safeguards; an unresolved
+  geometry conflict can recur on retry.
 
 v1.501 - HOTFIX
 ---------------
@@ -282,7 +297,7 @@ v1.100 - Additional work
 Installation
 ============
 
-1. Download SCOLIDEX-v1.501-win-x64.zip from the GitHub release.
+1. Download SCOLIDEX-v1.502-win-x64.zip from the GitHub release.
 2. Extract the complete archive to a writable folder.
 3. Run SCOLIDEX-win-x64\SCOLIDEX.exe.
 4. Optionally run AddShortcutDesktop.cmd from the extracted top-level folder.

@@ -78,7 +78,7 @@ internal static partial class Program
 
             RawGridStats? existingStats = TryGetRawGridStats(
                 tile.RawHeightPath, ExperimentalRawGridSize);
-            if (!overwriteFlag && existingStats is not null && !existingStats.IsEmpty)
+            if (!overwriteFlag && !RetryTileIssue(tile.TileFile.Name, "Terrain") && existingStats is not null && !existingStats.IsEmpty)
             {
                 skipped++;
                 WriteLogDetail("Skipped", $"4m raw grid already has {existingStats.ValidCount:N0} valid height samples");
@@ -113,9 +113,15 @@ internal static partial class Program
                 RecordTileException();
                 WriteFailureDiagnostics("HD terrain failure", ex);
                 failed++;
+                RecordTileIssue(tile.TileFile.Name, "Terrain", ex.ToString());
                 retryableFailedTileNames.Add(GetTerrainTileBaseName(tile));
                 MarkTerrainTileForAppendRetry(tile, ExperimentalRawGridSize);
                 WriteLogDetail("HD Test 4m generation failed", ex.Message);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                RecordTileIssue(tile.TileFile.Name, "Terrain", ex.ToString());
+                throw;
             }
 
             PrintProgressCheckpoint(tileNumber, tiles.Count, generatedCount, skipped, failed);
@@ -513,10 +519,10 @@ internal static partial class Program
             foreach ((int X, int Z) key in keysToFlush)
             {
                 ExperimentalGeneratedTile generated = pending[key];
-                WriteExperimental4mTile(
+                WriteTileWithErrorTracking(generated.Tile.TileFile.Name, "Terrain", () => WriteExperimental4mTile(
                     outputDir,
                     generated,
-                    patchesByTile[generated.Tile.TileFile.Name]);
+                    patchesByTile[generated.Tile.TileFile.Name]));
                 Console.WriteLine(
                     $"  -> Wrote {generated.Tile.TileFile.Name} from rolling 4m seam window.");
                 pending.Remove(key);

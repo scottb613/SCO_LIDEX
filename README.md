@@ -4,9 +4,16 @@ SCO LIDEX is a Windows terrain-building utility for Open Rails and MSTS route de
 
 The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v2.txt](docsMaster/POLYVEG-GEODATA-CONTRACT-v2.txt).
 
-> **Current version:** v1.501.
+> **Current version:** v1.502.
 
 ## Release Highlights
+
+### v1.502 — Run recovery and diagnostics
+
+- Logs and skips conflicting PolyVeg section pieces while continuing the run.
+- Maintains `SCOLIDEXErrors.txt` in the route with tile IDs, outstanding stages, error details, and timestamps. Append merges it with the user tile list and removes resolved errors after successful output. Scan remains read-only.
+- Retains the plain-text Desktop `SCOLIDEX.log` and creates `SCOLIDEX-diagnostics.zip` after error runs, capped at 100 MB. The ZIP includes bounded log/list copies and up to eight exact PolyVeg conflict geometry samples with CRS, library versions, source metadata and overlay settings. Any omissions are reported.
+- Omitted PolyVeg pieces can leave planting gaps. Other geometry exceptions and operation-wide failures retain their safeguards. PolyVeg retries rebuild the complete route handoff from cached OSM data; an unresolved geometry conflict can recur on retry.
 
 ### v1.501 — HOTFIX
 
@@ -150,7 +157,7 @@ The exact LIDEX/TSRE planting handoff is recorded in [POLYVEG-GEODATA-CONTRACT-v
 
 ## Installation
 
-1. Download `SCOLIDEX-v1.501-win-x64.zip` from the [v1.501 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.501).
+1. Download `SCOLIDEX-v1.502-win-x64.zip` from the [v1.502 release](https://github.com/scottb613/SCO_LIDEX/releases/tag/v1.502).
 2. Extract the complete archive to a writable folder.
 3. Run `SCOLIDEX-win-x64\SCOLIDEX.exe`.
 4. Optionally run `AddShortcutDesktop.cmd` from the extracted top-level folder.

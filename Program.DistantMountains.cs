@@ -134,7 +134,7 @@ internal static partial class Program
             EnsureExactFileNameCasing(heightPath);
 
             RawGridStats? existingLoStats = TryGetRawGridStats(heightPath);
-            if (!overwriteFlag && File.Exists(tilePath) && existingLoStats is not null && !existingLoStats.IsEmpty)
+            if (!overwriteFlag && !RetryTileIssue(NormalTileErrorName(loTile.X, loTile.Z), "DM") && File.Exists(tilePath) && existingLoStats is not null && !existingLoStats.IsEmpty)
             {
                 WriteLogDetail("Skipped", $"lo_tile raw grid already has {existingLoStats.ValidCount:N0} valid height samples");
                 skipped++;
@@ -191,8 +191,14 @@ internal static partial class Program
                 RecordTileException();
                 WriteFailureDiagnostics("Distant Mountain failure", ex);
                 failed++;
+                RecordTileIssue(NormalTileErrorName(loTile.X, loTile.Z), "DM", $"lo_tile={loName}.t; {ex}");
                 MarkDistantMountainTileForAppendRetry(tilePath, heightPath);
                 WriteLogDetail("Distant Mountain generation failed", ex.Message);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                RecordTileIssue(NormalTileErrorName(loTile.X, loTile.Z), "DM", $"lo_tile={loName}.t; {ex}");
+                throw;
             }
         }
 
@@ -314,7 +320,8 @@ internal static partial class Program
                 .ToList();
             foreach ((int X, int Z) key in keysToFlush)
             {
-                WriteDistantMountainTile(pending[key]);
+                GeneratedLoTile generated = pending[key];
+                WriteTileWithErrorTracking(NormalTileErrorName(generated.Tile.X, generated.Tile.Z), "DM", () => WriteDistantMountainTile(generated));
                 pending.Remove(key);
             }
         }
@@ -527,6 +534,13 @@ internal static partial class Program
             }
         }
 
+        if (TileErrorsFor(route.RouteDir) is { Append: true } errorSession)
+        {
+            foreach (TileCoordinate tile in ReadAppendTileCoordinates(route.RouteDir))
+                AddLoTileCoverage(coverage, tile.X, tile.Z, loTileRadius);
+            foreach (TileCoordinate tile in errorSession.DmTiles())
+                coverage.Add(new LoTileCoordinate(tile.X, tile.Z));
+        }
         return coverage;
     }
 

@@ -14,8 +14,10 @@ internal static partial class Program
     {
         private static void RunSectionBoundaryProbe(RouteLayout route, GeoTileMapper mapper, string sourcePath)
         {
+            RunSectionConflictRecoveryProbe(route, mapper, sourcePath);
             string osmDirectory = GetRouteOsmDirectory(route.RouteDir);
             string output = Path.Combine(osmDirectory, "polyveg-polygons.geojson");
+            using TileErrorSession retryErrors = new(route.RouteDir, append: true);
             using (RoutePolyVegGeodataBuilder builder = new(route, mapper, sourcePath, CancellationToken.None))
             {
                 // Exercise the exact export/reparse gate that precedes output and counts.
@@ -46,6 +48,8 @@ internal static partial class Program
                 builder.StageExclusion(new("building/1", "building", mask1.Clone()));
                 builder.StageExclusion(new("building/2", "building", mask2.Clone()));
                 builder.WriteAndPromote();
+                if (retryErrors.HasStage("PolyVeg"))
+                    throw new InvalidDataException("Successful validated promotion did not clear resolved PolyVeg tile errors");
 
                 Dictionary<string, Geometry> actual = new();
                 try
@@ -121,6 +125,72 @@ internal static partial class Program
             if (Directory.GetFiles(osmDirectory, "*.tmp*").Length != 0)
                 throw new InvalidDataException("Failed generation left temporary output files");
             Console.WriteLine("PolyVeg section probe: PASSED (source assembly, crossing masks, draw order, global-reference agreement, failure/cancellation preservation).");
+        }
+
+        private static void RunSectionConflictRecoveryProbe(RouteLayout route, GeoTileMapper mapper, string sourcePath)
+        {
+            using TileErrorSession errors = new(route.RouteDir, append: true);
+            using RoutePolyVegGeodataBuilder builder = new(route, mapper, sourcePath, CancellationToken.None);
+            using Geometry core = builder.BuildProjectedTileCoverage(builder.coverageTiles[0]);
+            PolyVegSource rejected = new("way/conflict", "woodland", "natural=wood", 20,
+                141, 196, 108, new(), core, core.GetArea());
+            TextWriter previous = Console.Out;
+            using StringWriter diagnostics = new(System.Globalization.CultureInfo.InvariantCulture);
+            try
+            {
+                Console.SetOut(diagnostics);
+                if (builder.TryStagePolyVegSection(0, 100, rejected, core, core, core, null,
+                        new(core, core, core, core)) ||
+                    builder.TryStagePolyVegSection(0, 100, rejected, core, core, null, core,
+                        new(core, core, null, core)))
+                    throw new InvalidDataException("Conflicting section piece was accepted");
+            }
+            finally { Console.SetOut(previous); }
+            string log = diagnostics.ToString();
+            if (builder.conflictingSectionPiecesSkippedCount != 2 || builder.stage.Count("pieces") != 0 ||
+                !new[] { "permanent exclusion conflict", "visible-layer overlap", "way/conflict",
+                    "category=woodland", "style=natural=wood", "Conflict area=", "Conflict bounds",
+                    "world file=", "OSM working source=" }.All(log.Contains))
+                throw new InvalidDataException("Section conflict omission or diagnostics are incomplete");
+            if (errors.Support?.Samples.Count != 2) throw new InvalidDataException("Conflict reproduction samples were not captured");
+            foreach (string samplePath in errors.Support.Samples)
+            {
+                using var sample = System.IO.Compression.ZipFile.OpenRead(samplePath);
+                byte[] ReadBytes(string name)
+                {
+                    using Stream input = sample.GetEntry(name)!.Open();
+                    using MemoryStream bytes = new();
+                    input.CopyTo(bytes);
+                    return bytes.ToArray();
+                }
+                using JsonDocument metadata = JsonDocument.Parse(ReadBytes("metadata.json"));
+                using Geometry candidate = Geometry.CreateFromWkb(ReadBytes("candidate.wkb"));
+                using Geometry mask = Geometry.CreateFromWkb(ReadBytes(sample.GetEntry("raw-exclusions.wkb") is null ? "claimed.wkb" : "raw-exclusions.wkb"));
+                using Geometry conflict = candidate.Intersection(mask);
+                if (metadata.RootElement.GetProperty("crs").GetString() != $"EPSG:{builder.projectedEpsg}" ||
+                    Math.Abs(conflict.GetArea() - metadata.RootElement.GetProperty("conflictAreaSquareMetres").GetDouble()) > 0.000001 ||
+                    sample.GetEntry("local-source.wkb") is null || sample.GetEntry("without-exclusions.wkb") is null)
+                    throw new InvalidDataException("Saved geometry could not reproduce the detected conflict");
+            }
+
+            // A later valid source must still assemble, validate and promote.
+            // Neither rejected candidate was staged or reserved as claimed land.
+            builder.StageSource(rejected with { SourceId = "way/valid", ProjectedGeometry = core.Clone() });
+            builder.WriteAndPromote();
+            string osmDirectory = GetRouteOsmDirectory(route.RouteDir);
+            using JsonDocument output = JsonDocument.Parse(File.ReadAllText(Path.Combine(osmDirectory, "polyveg-polygons.geojson")));
+            JsonElement features = output.RootElement.GetProperty("features");
+            using JsonDocument manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(osmDirectory, "route-geodata.json")));
+            if (features.GetArrayLength() != 1 ||
+                features[0].GetProperty("properties").GetProperty("sourceId").GetString() != "way/valid" ||
+                manifest.RootElement.GetProperty("diagnostics").GetProperty("conflictingSectionPiecesSkipped").GetInt32() != 2)
+                throw new InvalidDataException("Valid output or conflict summary was lost after section conflicts");
+            if (!errors.Has(NormalTileErrorName(builder.coverageTiles[0].X, builder.coverageTiles[0].Z), "PolyVeg"))
+                throw new InvalidDataException("Conflicting tile was not persisted in the error file");
+            using (TileErrorSession retry = new(route.RouteDir, append: true, readOnly: true))
+                if (GetRouteTileProcessingList(route, false, false, false, true, 0).Count != 1)
+                    throw new InvalidDataException("Error-only Append did not select the actual failed terrain tile");
+            Console.WriteLine("PolyVeg conflict recovery probe: PASSED (both conflicts omitted, detailed warnings, later valid output promoted, manifest counts).");
         }
     }
 }

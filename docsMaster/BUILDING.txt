@@ -46,7 +46,7 @@ must be copied into every packaged distribution. Copy its text documents into
 the package root as well, verifying matching contents. README.md remains at the
 repository/package root. Internal rules and notes in docsInternal are not shipped.
 
-The release archive is dist\SCOLIDEX-v1.501-win-x64.zip, containing exactly one
+The release archive is dist\SCOLIDEX-v1.502-win-x64.zip, containing exactly one
 top-level SCOLIDEX folder. Verify the executable version, complete runtime/GDAL
 files, supplied WAV assets, terrain templates, documentation, ZIP size, and
 SHA-256 before publishing.
@@ -60,9 +60,25 @@ OSM / PolyVeg regression probes (no network access):
   dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --route-osm-lifecycle-probe
   dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --osm-streaming-probe
 
+Automatic tile error/retry list regression (no network access):
+  dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --tile-errors-probe
+Checks atomic concurrent updates, stage-specific resolution, persistence across
+restart, merged and error-only Append selection, Overwrite isolation, read-only
+Scan, and preservation of the user tile list. The lifecycle probe also checks
+that skipped PolyVeg conflicts persist their tile in the automatic error file.
+
+Bounded support archive regression (no network access):
+  dotnet bin\Release\net10.0-windows\SCOLIDEX.dll --support-bundle-probe
+Checks errors-only packaging, preservation of the original log, bounded copies,
+geometry sample limits, omission reporting and the 100 MB archive cap. The OSM
+lifecycle probe also reopens captured WKB and reproduces the detected conflict
+area from the saved candidate and mask geometries.
+
 The lifecycle probe checks categories, colors, holes, section-boundary assembly,
 exclusions, per-tile map rendering, and preservation of prior outputs on failure
-or cancellation. The streaming probe reads 1,050,849 features, checks malformed
+or cancellation. It also checks omission and detailed diagnostics for section
+exclusion/overlap conflicts, subsequent valid export, and manifest skip counts.
+The streaming probe reads 1,050,849 features, checks malformed
 JSON and cancellation, and exercises spatial/source indexes on 100,000 staged
 masks. Temporary fixtures are created under the OS temp folder and removed.
 

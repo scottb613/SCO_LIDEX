@@ -301,7 +301,8 @@ internal static partial class Program
             null, null, null)
             ?? throw new InvalidOperationException("GDAL could not open the compact route OSM cache"))
         {
-            LoadOsmGeometry(dataSource, route, mapper, tiles, routeWorkingCache, extracts.Any(extract => extract.Downloaded),
+            LoadOsmGeometry(dataSource, route, mapper, tiles, routeWorkingCache, extracts.Any(extract => extract.Downloaded) ||
+                TileErrorsFor(route.RouteDir) is { Append: true } errorSession && errorSession.HasStage("PolyVeg"),
                 cancellationToken, buildDerivative: true, collectMapGeometry: false);
         }
         WriteOsmLogEntry("Map geometry will be loaded and released per tile (at most two tiles in memory).");
@@ -346,11 +347,13 @@ internal static partial class Program
                 bitmap.Save(pngTemp, ImageFormat.Png);
 
                 File.Move(pngTemp, pngPath, overwrite: true);
+                ResolveTileIssue(baseName + ".t", "Maps");
                 Interlocked.Increment(ref completed);
             }
             catch (Exception ex) when (ex is InvalidDataException or ArgumentException or FormatException)
             {
                 RecordTileException();
+                RecordTileIssue(baseName + ".t", "Maps", ex.ToString());
                 mapTileFailures.Add($"{baseName}: {ex.GetType().Name}: {ex.Message}");
                 WriteFailureDiagnostics($"Map tile exception - skipped: {baseName}; output={pngPath}", ex);
             }
@@ -363,6 +366,7 @@ internal static partial class Program
                 ex.Data["Map output path"] = pngPath;
                 ex.Data["Temporary output path"] = pngTemp;
                 ex.Data["Route geometry cache"] = routeWorkingCache;
+                if (ex is not OperationCanceledException) RecordTileIssue(baseName + ".t", "Maps", ex.ToString());
                 throw;
             }
             finally
@@ -400,7 +404,7 @@ internal static partial class Program
     private static HttpClient CreateMapHttpClient(TimeSpan timeout)
     {
         HttpClient client = new() { Timeout = timeout };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.501 (Open Rails terrain builder)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SCO-LIDEX/1.502 (Open Rails terrain builder)");
         return client;
     }
 
